@@ -12,6 +12,7 @@
 // See the License for the specific language governing permissions and
 // limitations under the License.
 
+// sample and trace the events and record them from memory to the file
 package tracing
 
 import (
