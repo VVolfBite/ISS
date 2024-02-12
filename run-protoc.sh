@@ -4,4 +4,3 @@
 # Always run from the project parent directory.
 
 protoc -I protobufs --go_out=plugins=grpc:protobufs protobufs/*.proto
-

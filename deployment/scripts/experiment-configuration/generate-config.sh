@@ -12,7 +12,7 @@
 # fra05 hkg02 lon02 lon04 lon05 lon06 mex01 mil01 mon01 par01 sao01
 # seo01 sjc01 sjc03 sjc04 sng01 syd01 syd04 syd05 tok02 tok04 tok05
 # tor01 tor04 tor05 wdc01 osa21 osa22 osa23 wdc04 wdc06 wdc07
-#
+#equestBufferSizes="
 # LAN experiments:
 # machineLocations="fra02"
 #

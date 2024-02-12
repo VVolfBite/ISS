@@ -200,7 +200,7 @@ func (b *Bucket) addNoLock(newReq *Request) (*Request, bool) {
 		if config.Config.SignRequests && config.Config.VerifyRequestsEarly && !newReq.Verified {
 			return nil, true
 
-			// If request is either already verified or no verification is required to add reqeusts to the backet,
+			// If request is either already verified or no verification is required to add requests to the bucket,
 			// add the new request and notify BucketGroup.
 		} else {
 			//logger.Trace().
