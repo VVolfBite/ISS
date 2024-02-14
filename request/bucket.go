@@ -33,26 +33,32 @@ type Bucket struct {
 	// Any modification (or read of potentially concurrently modified values)
 	// of the request buffer requires acquiring this lock.
 	// Using this syntax, one can use .Lock() and .Unlock() methods directly on the Bucket.
+	// 锁
 	sync.Mutex
 
 	// The bucket id.
 	// Currently only used for printing debug messages.
+	// 桶Id
 	id int
 
 	// BucketGroup waiting to cut a batch of requests (also) from this Bucket.
 	// If no BucketGroup is waiting for this Bucket, group nil.
 	// Used for notifying the BucketGroup waiting to cut a batch about request additions.
 	// Modifications of this field also require the Bucket to be locked.
+	// 桶所属的节点标识
 	Group *BucketGroup
 
 	// Index of requests in this bucket by their request ID (client ID and client sequence number)
 	// Always contains a superset of the requests in the doubly linked list and is garbage-collected
 	// when watermarks are advanced.
+	// 用于快速确认是否存在Req
 	reqIndex map[int64]*Request
 
 	// Number of requests currently in the bucket.
+	// Req的数量
 	numRequests int
 
+	// 双向链表
 	// Start of a doubly linked list of requests in the bucket.
 	// Necessary for constant-time adding and removing, while still being able to traverse in consistent order.
 	// If set to nil, no requests are in the bucket (and LastRequest also must be nil).

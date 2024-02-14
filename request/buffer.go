@@ -36,6 +36,8 @@ type Buffer struct {
 	sync.RWMutex
 
 	// ID of the client this buffer is associated to.
+	// 该BUFFER所属的Client
+
 	ClientID int32
 
 	// Start of the client watermark window (as seen locally by the replica).
@@ -45,6 +47,7 @@ type Buffer struct {
 	// and (LowWatermark + config.Config.ClientWatermarkWindowSize) can be added to the buffer.
 	// Additionaly, up to config.Config.ClientRequestBacklogSize requests will be stored in the buffer's backlog
 	// and added automatically when LowWatermark increases in Buffer.AdvanceWatermarks()
+	// 窗口间隔的被buffer 之上的被备份
 	LowWatermark int32
 
 	// Map from client sequence numbers to boolean values indicating whether the corresponding request has been committed.
@@ -79,6 +82,7 @@ func NewBuffer(clientID int32) *Buffer {
 // Add() returns nil.
 // ATTENTION: The Add() method does not lock the buffer (as it is also called from another method that does).
 //            Still, the Buffer must be locked when calling Add().
+// 试着加入Req至缓存，、返回值表示是否允许加入
 func (b *Buffer) Add(req *Request) bool {
 
 	// Convenience variables
@@ -129,6 +133,7 @@ func (b *Buffer) Add(req *Request) bool {
 // Tries to add requests from the backlog back to the buffer
 // (since some of them might be now in the watermark window).
 // Returns the old and the new watermark.
+// 逐个新增的Entries中确认自己的Req然后标记为Committed，然后从backlog开始拿出新的Req并存入Buffer和Bucket
 func (b *Buffer) AdvanceWatermarks(entries []interface{}) watermarkRange { // expected type of entries: []*log.Entry
 
 	// We need to lock the buffer to prevent concurrent incoming requests to observe inconsistent watermarks.
@@ -182,6 +187,7 @@ func (b *Buffer) AdvanceWatermarks(entries []interface{}) watermarkRange { // ex
 
 // Tries to add all requests from the backlog to the Buffer.
 // (Some requests might end up in the backlog again.)
+// 将不再超前的Req加入Bucket和Buffer
 func (b *Buffer) processBacklog(requests []interface{}) {
 
 	for _, req := range requests {

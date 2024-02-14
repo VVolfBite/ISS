@@ -65,6 +65,7 @@ type watermarkRange struct {
 
 // Initialize the request package.
 // Cannot be part of the init() function, as the configuration file is not yet loaded when init() is executed.
+// 初始化Req的输入和验证通道
 func Init() {
 
 	// Initializes the Buckets.
@@ -183,6 +184,7 @@ func AddReqMsg(reqMsg *pb.ClientRequest) *Request {
 }
 
 // Adds a request received as a protobuf message to the appropriate buffer and bucket.
+// 将Req加入他的Buffer和Bucket
 func Add(req *Request) *Request {
 
 	// The buffer needs to be Rlocked not only while checking watermarks, but also while adding the request to the Bucket!
@@ -231,6 +233,7 @@ func Add(req *Request) *Request {
 
 // Removes all requests in batch from their respective Buckets.
 // The buffer is not affected by this function.
+// 将一个batch中的所有Req从Buckets中移除
 func RemoveBatch(batch *Batch) {
 
 	// Do nothing if batch is empty.
@@ -262,6 +265,7 @@ func RemoveBatch(batch *Batch) {
 
 // Advances the client watermarks of all Buffers.
 // This allows new Requests to be added to the Buffers.
+// 推进WM， 推进时先推进所有的Buffer完毕，再推进所有的Bucket完毕
 func AdvanceWatermarks(entries []interface{}) { //expected type is []*log.Entry
 	logger.Info().Int("numEntries", len(entries)).Msg("Advancing watermarks.")
 
