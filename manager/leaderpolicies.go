@@ -75,6 +75,7 @@ func (sp *simpleLeaderPolicy) Update(e int32, suspect int32) {
 // Single
 //============================================================
 
+// e应当是Epoch
 type singleLeaderPolicy struct{}
 
 func newSingleLeaderPolicy() *singleLeaderPolicy {

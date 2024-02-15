@@ -22,6 +22,7 @@ import (
 // Represents a segment with a contiguous range of sequence numbers.
 // The representation is concise, but accessing the list of sequence
 // numbers is expensive, as it is generated each time.
+// 规定这个seg的基本结构：谁是leader谁是follower，该Seg内有多少个Sn等这样的信息
 type ContiguousSegment struct {
 	segID       int
 	leaders     []int32

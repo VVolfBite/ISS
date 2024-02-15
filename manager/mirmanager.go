@@ -35,13 +35,16 @@ type MirManager struct {
 	// The set of possible mir-leaders: mir-leaders are the first ids in the set of leaders of a segment.
 	// The only the first leader of a segment is allowed to propose new batches.
 	// The rest of segment leaders can only re-propose batches or proposes empty batches to guatantee that an epoch finishes.
-	// The manager announces new segments by pushing them to this channel.
+	// The manager announces new segments by pushing them to this channel
+	// 那么本质还是单领导节点
 	leaderPolicy leaderPolicy
+
 
 	epoch int32
 
 	// A map that holds the nodes suspected in the current epoch to make sure
 	// we don't update the leader policy more than once per epoch for the same node
+	// 黑名单
 	currentSuspects map[int32]bool
 
 	// Segment issued for the current epoch, indexed by leader ID.
@@ -62,6 +65,7 @@ type MirManager struct {
 
 	// Buffers all the log entries committed during one epoch.
 	// Used for garbage collection and client watermark advancing.
+	// 记录了一个Epoch的所有提交Entry，用于回收和Watermark推进
 	epochEntryBuffer *util.ChannelBuffer
 }
 
@@ -90,6 +94,7 @@ func NewMirManager() *MirManager {
 // - Issues new segments as the watermark window advances with new stable checkpints.
 // Meant to be run as a separate goroutine.
 // Decrements the provided wait group when done.
+// 开始两个线程分别用于： 1. 触发检查点 2. 签发新的SEG和SN
 func (mm *MirManager) Start(wg *sync.WaitGroup) {
 	defer wg.Done()
 
@@ -108,11 +113,13 @@ func (mm *MirManager) Start(wg *sync.WaitGroup) {
 }
 
 // The node is always an orderer - return channel to which all issued Segments are pushed.
+// 返回用于推送签发Seg的通道
 func (mm *MirManager) SubscribeOrderer() chan Segment {
 	return mm.segmentChannel
 }
 
-// The node is always a potential checkpointer - return channel with all checkpointed sequence numbers.
+// The node is always a potential checkpointer - return channel with all checkpointed sequence numbers
+// 返回用于推送签发SN的通道
 func (mm *MirManager) SubscribeCheckpointer() chan int32 {
 	return mm.checkpointSNChannel
 }
@@ -120,6 +127,7 @@ func (mm *MirManager) SubscribeCheckpointer() chan int32 {
 // Observes the progressing log entries and triggers the checkpointing protocol as they advance.
 // Meant to be run as a separate goroutine.
 // Decrements the provided wait group when done.
+// 进行缓存Entry并更新黑名单，然后根据Entry判断是否到了新的Epoch，若是则重置每个Epoch的一些内容
 func (mm *MirManager) handleLogEntries(wg *sync.WaitGroup) {
 	defer wg.Done()
 
@@ -142,14 +150,15 @@ func (mm *MirManager) handleLogEntries(wg *sync.WaitGroup) {
 	for entry := <-mm.entriesChannel; entry != nil; entry = <-mm.entriesChannel {
 		if entry.Aborted {
 			// If its the first time in the current epoch we see this node as a suspect
+			// 从没能提交的Aborted的Entry的领导节点追究责任，即机上黑名单，下次不许当leader
 			if _, ok := mm.currentSuspects[entry.Suspect]; !ok {
 				mm.currentSuspects[entry.Suspect] = true
 				mm.leaderPolicy.Update(mm.epoch, entry.Suspect)
 			}
 		}
-
+		// 缓存entry
 		mm.epochEntryBuffer.Add(entry)
-
+		// 判断该Epoch结束，是则进行Seg签发和黑名单重置
 		// Advance epoch
 		if entry.Sn == int32(lastEpochSN) {
 
@@ -207,6 +216,7 @@ func (mm *MirManager) handleLogEntries(wg *sync.WaitGroup) {
 // Observes the appearing stable checkpoints and advances the watermark window by issuing new segments.
 // Meant to be run as a separate goroutine.
 // Decrements the provided wait group when done.
+// 每当有新的检查点，节点都会尝试去跟进状态
 func (mm *MirManager) handleCheckpoints(wg *sync.WaitGroup) {
 	defer wg.Done()
 
@@ -225,6 +235,7 @@ func (mm *MirManager) handleCheckpoints(wg *sync.WaitGroup) {
 
 // Create new Segments, announce them to the Orderer,
 // and save them in the index (by sequence number) of this epoch's Segments.
+// 将根据规则划分的的Segs存入chan中
 func (mm *MirManager) issueSegments(oldEpochEntries []interface{}, leaders []int32, offset int32) {
 	// Create new segments
 	mm.currentSegments = mm.createSegments(mm.currentSegments, oldEpochEntries, leaders, offset)
@@ -256,6 +267,7 @@ func (mm *MirManager) issueSegments(oldEpochEntries []interface{}, leaders []int
 // In each epoch the number of segments issued equals the number of mir-leaders.
 // Each leader is responsible for a segment.
 // The offset argument is the first sequence number of the epoch.
+// 将Epoch划分为无缝隙不相交的Segs，然后根据规则确定出Segs的分配情况并找到属于该节点自己的Seg
 func (mm *MirManager) createSegments(oldSegments map[int32]Segment, oldEpochEntries []interface{}, leaders []int32, offset int32) map[int32]Segment {
 
 	// The distance of the sequence numbers in the skipping segment equals the number of mir-leaders
@@ -334,6 +346,7 @@ func (mm *MirManager) createSegments(oldSegments map[int32]Segment, oldEpochEntr
 
 // Given a list of leader IDs, returns a list of lists of Bucket IDs,
 // assigning one list of Bucket IDs to each leader.
+// 类似之前的分配方案，先全体都分，然后收回非领导节点的，分给是领导节点的，因为黑名单，可能一些节点并不能在本epoch作为leader
 func (mm *MirManager) assignBuckets(leaders []int32) map[int32][]int {
 
 	// Convenience variables
@@ -389,7 +402,7 @@ func (mm *MirManager) assignBuckets(leaders []int32) map[int32][]int {
 
 	return finalBuckets
 }
-
+// 不太懂这个msg是做什么的
 func (mm *MirManager) createBucketAssignmentMsg(assignment map[int32][]int) *pb.BucketAssignment {
 
 	// Allocate new message.
@@ -415,6 +428,7 @@ func (mm *MirManager) createBucketAssignmentMsg(assignment map[int32][]int) *pb.
 	return msg
 }
 
+// 调整batch大小，目前也不要管
 func adaptedBatchSize(oldSegments map[int32]Segment, entries []interface{}, leaders []int32, newSegments map[int32]Segment) int { // entries must be of type []*log.Entry
 
 	// Convenience variables

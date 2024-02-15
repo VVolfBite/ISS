@@ -44,10 +44,12 @@ var (
 	receivedEntries   = make(chan *pb.MissingEntry, receivedEntriesBufferSize)
 )
 
+// 开启一个处理MissingEntry的线程
 func Init() {
 	go processMissingEntries()
 }
 
+// 处理MissingEntry的Req或Resp
 func HandleMessage(msg *pb.ProtocolMessage) {
 	switch m := msg.Msg.(type) {
 	case *pb.ProtocolMessage_MissingEntryReq:
@@ -56,7 +58,7 @@ func HandleMessage(msg *pb.ProtocolMessage) {
 		receivedEntries <- m.MissingEntry
 	}
 }
-
+// 跟进状态，即开启线程获取MissingEntry
 func CatchUp(checkpoint *pb.StableCheckpoint) {
 	// Give the protocol some time to acquire the entries normally.
 	time.Sleep(startDelay)
@@ -72,6 +74,7 @@ func CatchUp(checkpoint *pb.StableCheckpoint) {
 	}
 }
 
+// 获取MissEntry
 func FetchMissingEntry(sn int32, sources []int32) {
 
 	// Create a new missing entry data structure.
@@ -127,6 +130,7 @@ func FetchMissingEntry(sn int32, sources []int32) {
 
 // This is the only thread that manipulates the data structures of this package.
 // It inserts new missing entries and handles responses to missing entry requests.
+// 尝试从他人的Resp获取丢失的Entry
 func processMissingEntries() {
 	// TODO: implement graceful shutdown (by closing the channels).
 
@@ -150,6 +154,7 @@ func processMissingEntries() {
 	}
 }
 
+// 从他人的Resp获取丢失的Entry
 func processResponse(resp *pb.MissingEntry) error {
 
 	me, ok := missingEntries[resp.Sn]
@@ -192,6 +197,7 @@ func verifyResponse(resp *pb.MissingEntry, me *missingEntry) error {
 	return nil
 }
 
+// 响应其他人的CatchUp行为
 func handleRequest(req *pb.MissingEntryRequest, senderID int32) {
 
 	// In this simple implementation, we send the entry if we have it, otherwise we ignore the request.

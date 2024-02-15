@@ -44,6 +44,7 @@ func (b *Batch) MarkInFlight() {
 
 // Checks if the batch contains "in flight" requests.
 // If the batch has "in flight" requests the method returns an error.
+// 检测是否有Inflight的请求
 func (b *Batch) CheckInFlight() error {
 	for _, req := range b.Requests {
 		if req.InFlight {
@@ -55,6 +56,7 @@ func (b *Batch) CheckInFlight() error {
 
 // Checks if the requests in the batch match a specific bucket.
 // If there exists some request that does not match the bucket id the method returns an error.
+// 检查Batch中的请求是否都有激活的桶作为归属
 func (b *Batch) CheckBucket(activeBuckets []int) error {
 	for _, req := range b.Requests {
 		bucketID := getBucket(req.Msg).id
@@ -72,6 +74,7 @@ func (b *Batch) CheckBucket(activeBuckets []int) error {
 	return nil
 }
 
+// 检查来自CLient的签名
 func (b *Batch) CheckSignatures() error {
 	if batchVerifierFunc(b) {
 		return nil
@@ -82,6 +85,7 @@ func (b *Batch) CheckSignatures() error {
 
 // Creates a batch from a protobuf message and tries to add the requests of the message to their buffer.
 // If the request is not added successfully (Add returns nil) this method also returns nil
+// 利用负载装填一个batch结构并检查签名
 func NewBatch(msg *pb.Batch) *Batch {
 
 	logger.Debug().Int("nReq", len(msg.Requests)).Msg("Creating new Batch.")
@@ -112,6 +116,7 @@ func NewBatch(msg *pb.Batch) *Batch {
 }
 
 // Returns a protobuf message containing this Batch.
+// 将Batch还原成ReqMsg
 func (b *Batch) Message() *pb.Batch {
 	// Create empty Batch message
 	msg := pb.Batch{
@@ -129,6 +134,7 @@ func (b *Batch) Message() *pb.Batch {
 
 // Returns requests in the batch in their buckets after an unsuccessful proposal.
 // TODO: Optimization: First group the requests by bucket and then prepend each group at once.
+// 将未能Inflight的Req重新取回，应该是在提议后立即调用检查
 func (b *Batch) Resurrect() {
 	for _, req := range b.Requests {
 		req.InFlight = false
@@ -220,6 +226,7 @@ func checkSignaturesExternal(b *Batch) bool {
 	return invalidReqs == 0
 }
 
+// 返回Batch哈希
 func BatchDigest(batch *pb.Batch) []byte {
 	metadata := make([]byte, 0, 0)
 	reqDigests := make([][]byte, len(batch.Requests), len(batch.Requests))

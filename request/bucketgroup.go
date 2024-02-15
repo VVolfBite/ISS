@@ -27,6 +27,7 @@ import (
 type BucketGroup struct {
 	// List of buckets in the group.
 	// Must be sorted by Bucket ID and, when locking buckets, locks must be acquired in list order.
+	// 组内桶
 	buckets []*Bucket
 
 	// Total number of requests in the buckets.
@@ -36,11 +37,13 @@ type BucketGroup struct {
 	// When CutBatch() has been called but the Buckets have fewer than BatchSize requests in total, CutBatch() blocks.
 	// Before blocking, it sets cutThreshold to the number of requests it is waiting for.
 	// When CutBatch() is not waiting, cutThreshold is -1.
+	// 等待阀值
 	cutThreshold int
 
 	// When CutBatch() is waiting for more requests to be added to the Bucket, this variable holds the Timer
 	// implementing a timeout, after which CutBatch() proceeds regardless of the number of requests in the Bucket.
 	// When CutBatch() is not waiting, timer is nil.
+	// 等待超时计时器
 	timer *time.Timer
 
 	// When CutBatch() is waiting for more requests to be added to the Buckets, it blocks on reading from this channel.
@@ -53,6 +56,7 @@ type BucketGroup struct {
 	// This is used to moderate the speed at which batches are cut when the bucket is full.
 	// It is useful to limit the rate at which data is put on the wire, decreasing the likelihood of view changes
 	// when too much data is sent out concurrently.
+	// 最小等待时刻
 	nextBatchTimestamp int64
 }
 
@@ -60,6 +64,7 @@ type BucketGroup struct {
 // The buckets parameter is a list of bucket IDs. NewBucketGroup() sorts this list!
 // Sorting by bucket ID is important to prevent deadlocks, as buckets are always locked in the order of this list.
 // NOTE: Currently there is always only one bucket group, so these deadlocks cannot occur, but this might change.
+// 根据bucketId将他们聚合成一个Group
 func NewBucketGroup(bucketIDs []int) *BucketGroup {
 
 	// Sort bucket IDs.
@@ -84,6 +89,7 @@ func NewBucketGroup(bucketIDs []int) *BucketGroup {
 // Returns a new request batch assembled from requests in the bucket group.
 // Blocks until the Buckets contain at least size requests, but at most for the duration of timeout.
 // On timeout, returns a batch with all requests in the Buckets, even if all the Buckets are empty.
+// 从组的桶剪出一个Batch
 func (bg *BucketGroup) CutBatch(size int, timeout time.Duration) *Batch {
 	alreadyWaited := bg.waitMinimum()
 	bg.lockBuckets()
@@ -91,6 +97,7 @@ func (bg *BucketGroup) CutBatch(size int, timeout time.Duration) *Batch {
 
 	// Wait for batch to fill or for the timeout to fire.
 	// May release and re-acquire the bucket locks before returning.
+	// 先等待再切Batch
 	bg.waitForRequestsLocked(size, timeout-time.Duration(alreadyWaited)*time.Nanosecond)
 
 	// Create new request batch
@@ -168,6 +175,7 @@ func (bg *BucketGroup) WaitForRequests(numRequests int, timeout time.Duration) {
 // When WaitForRequests returns, bg.totalRequests accurately represents the total number of requests in the BucketGroup.
 // ATTENTION: All Buckets must be LOCKED when calling this method.
 //            May release and re-acquire the bucket locks before returning.
+// 先等待timeout的时间，然后触发通知CutBatch
 func (bg *BucketGroup) waitForRequestsLocked(numRequests int, timeout time.Duration) {
 
 	// Count all requests in all buckets in the group.
@@ -202,6 +210,7 @@ func (bg *BucketGroup) waitForRequestsLocked(numRequests int, timeout time.Durat
 	bg.cutThreshold = -1
 }
 
+// 剩余的等待时间
 func (bg *BucketGroup) waitMinimum() int64 {
 	// Note that if nextBatchTimestamp is 0, this function returns immediately as expected.
 	dur := atomic.LoadInt64(&bg.nextBatchTimestamp) - time.Now().UnixNano()
@@ -216,6 +225,7 @@ func (bg *BucketGroup) waitMinimum() int64 {
 
 // Notifies the BucketGroup that is waiting to cut a batch about a request being added in one of its buckets.
 // Can be called concurrently from many Bucket.Add() methods (while the Bucket is locked).
+// 这是一个计数器函数，还有通知是否到达阀直的效果
 func (bg *BucketGroup) RequestAdded() {
 
 	// Atomically increment and fetch the number of requests in the BucketGroup.
@@ -237,8 +247,10 @@ func (bg *BucketGroup) RequestAdded() {
 	}
 }
 
+
 // Counts all requests in all buckets.
 // Only makes sense if the buckets are locked.
+// 数组的Req数量
 func (bg *BucketGroup) CountRequests() int {
 	n := 0
 	for _, b := range bg.buckets {
@@ -247,6 +259,7 @@ func (bg *BucketGroup) CountRequests() int {
 	return n
 }
 
+// 获取桶Id
 // Returns a list with the bucket IDs  in the Bucket Group.
 func (bg *BucketGroup) GetBucketIDs() []int {
 	ids := make([]int, len(bg.buckets))
@@ -256,6 +269,7 @@ func (bg *BucketGroup) GetBucketIDs() []int {
 	return ids
 }
 
+// 上锁解锁
 // Locks all buckets in the group.
 func (bg *BucketGroup) lockBuckets() {
 	for _, b := range bg.buckets {

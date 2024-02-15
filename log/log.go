@@ -75,6 +75,7 @@ var (
 // This is the final decision that will never be reverted.
 // If this is the first empty slot of the log, push the Entry (and potentially other previously committed entries with
 // higher sequence numbers) to the subscribers.
+// 将Entry提交至节点的本地log本质是调用publishEntry
 func CommitEntry(entry *Entry) {
 
 	// Only store an entry if it is not yet present.
@@ -102,6 +103,7 @@ func CommitEntry(entry *Entry) {
 }
 
 // Retrieve Entry with sequence number sn.
+// 根据Sn号获取Entry
 func GetEntry(sn int32) *Entry {
 	e, ok := entries.Load(sn)
 	if ok {
@@ -112,6 +114,7 @@ func GetEntry(sn int32) *Entry {
 }
 
 // Returns the sequence numbers of all empty log entries up to (and including) until
+// 找到所有的丢失的Sn号
 func Missing(until int32) []int32 {
 	missing := make([]int32, 0)
 
@@ -128,6 +131,7 @@ func Missing(until int32) []int32 {
 }
 
 // Creates and returns a new channel to which all the new log entries will be pushed in order.
+// 添加一个提交entry的通道
 func Entries() chan *Entry {
 
 	newChan := make(chan *Entry, entryChannelCapacity)
@@ -145,6 +149,7 @@ func Entries() chan *Entry {
 
 // Creates and returns a new channel to which all the new log entries will be pushed
 // as they are committed, out of order (regardless of potential "holes" in the log).
+// 添加一个提交entry的通道
 func EntriesOutOfOrder() chan *Entry {
 
 	newChan := make(chan *Entry, entryChannelCapacity)
@@ -167,6 +172,7 @@ func EntriesOutOfOrder() chan *Entry {
 //       Added after changes to the SimpleCheckpointer:
 //         SimpleCheckpointer relies on the absence of holes guaranteed by WaitForEntry.
 //         The Manager relies on the absence of holes for consistent watermark advancement.
+// 等待新的Entry到来，类似TCP的等待
 func WaitForEntry(sn int32) {
 
 	// Need this lock to protect from concurrent publishers.
@@ -197,6 +203,7 @@ func WaitForEntry(sn int32) {
 
 // If c has a higher sequence number than the most recent stable checkpoint committed so far, CommitCheckpoint()
 // replaces the most recent stable checkpoint by c and notifies all subscribers, if any.
+// 记录一个检查点
 func CommitCheckpoint(c *pb.StableCheckpoint) {
 
 	// The lock around this function is required, as concurrent invocations could result in storing a checkpoint that
@@ -221,6 +228,7 @@ func CommitCheckpoint(c *pb.StableCheckpoint) {
 }
 
 // Returns the latest stable checkpoint, or nil when there is no stable checkpoint.
+// 获取检查点
 func GetCheckpoint() *pb.StableCheckpoint {
 	// The lock is necessary to prevent race conditions with threads that read the checkpoint concurrently with updates.
 	checkpointLock.Lock()
@@ -233,6 +241,7 @@ func GetCheckpoint() *pb.StableCheckpoint {
 // committed. This might happen if other peers are faster at producing a checkpoint than this peer is at committing
 // entries. If the caller needs the entries to be committed, it can always call log.WaitForEntry(checkpoint.Sn)
 // using the returned checkpoint.
+// 创建一个检查点记录通道
 func Checkpoints() chan *pb.StableCheckpoint {
 
 	// Protect against multiple goroutines concurrently subscribing or somebody subscribing while a checkpoint is being
@@ -248,6 +257,7 @@ func Checkpoints() chan *pb.StableCheckpoint {
 }
 
 // Pushes committed entries to the subscribers, if any.
+// 将提交Entry推送给订阅节点
 func publishEntries() {
 	// The lock is necessary for potential concurrent subscribers calling Entries, but mainly for concurrent threads
 	// entering publishEntries() from CommitEntry() and potentially reading the same firstEmptySN, making them push

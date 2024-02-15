@@ -34,11 +34,13 @@ type Manager interface {
 	// Returns a channel to which the Manager pushes all segments in the ordering of which this node is involved.
 	// This function is called by the Orderer in order to know when a new instance of the ordering protocol needs
 	// to be started.
+	// 向Orderer推送新的Seg，Orderer需要调用并订阅
 	SubscribeOrderer() chan Segment
 
 	// Returns a channel to which the Manager pushes sequence numbers at which a checkpoint should occur.
 	// This function is called by the Checkpointer module to know when a new instance of the checkpoint protocol needs
 	// to be started.
+	// 向Checkpointer推送新的Sn，CheckPointer需要调用 并订阅
 	SubscribeCheckpointer() chan int32
 
 	// Starts the Manager, making it start issuing Segments and sequence numbers for checkpointing.
@@ -46,6 +48,7 @@ type Manager interface {
 	// Meant to be run as a separate goroutine, and thus no critical initialization must be performed here
 	// (e.g. subscribing to log events such as Entries or Checkpoints), as these actions may be delayed arbitrarily.
 	// Decrements the provided wait group when done.
+	// 开始线程进行签发Seg和Sn
 	Start(group *sync.WaitGroup)
 }
 
@@ -56,6 +59,7 @@ type Manager interface {
 // OPT: Most of the variables used in this function can be allocated statically and simply re-initialized,
 //      instead of allocating new copies on each call. However, as this function is not called very often,
 //      it probably has negligible impact on performance.
+// 桶分配，即文章中的所有节点分配桶，但只有非领导节点桶需要转移至领导节点，RoundRobin分配
 func assignBuckets(e int32, leaders []int32) []*request.BucketGroup {
 
 	// Convenience variables
