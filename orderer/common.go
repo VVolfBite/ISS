@@ -48,6 +48,7 @@ func (oc *ordererChannel) stop() {
 	atomic.StoreInt32(&oc.stopped, 1)
 }
 
+// 串行添加一个值，返回值指示通道是否关闭
 func (oc *ordererChannel) serialize(value *pb.ProtocolMessage) (closed bool) {
 	if atomic.LoadInt32(&oc.stopped) == 0 {
 		oc.channel <- value
@@ -58,11 +59,17 @@ func (oc *ordererChannel) serialize(value *pb.ProtocolMessage) (closed bool) {
 }
 
 type backlog struct {
+	// 最后一个Epoch
 	epochLast   int32
+	// 垃圾回收通道
 	gc          chan int32
+	// 接受信息的orderer通道
 	messages    *ordererChannel
+	// 订阅者接受信息的通道
 	subscribers chan backlogSubscriber
+	// msgIndex到Msg的映射
 	backlog     map[int32][]*pb.ProtocolMessage
+	// 分发器 应当存储的是其他节点的message通道4
 	dispatcher  map[int32]*ordererChannel
 }
 
@@ -85,10 +92,12 @@ func newBacklog() backlog {
 }
 
 // Returns false if the value was not added because the channel is closed
+// 向backlog添加一个值
 func (b *backlog) add(value *pb.ProtocolMessage) bool {
 	return b.messages.serialize(value)
 }
 
+// 处理信息，若有新的subscriber则存入通道中，有新的msg则添加入backlog等待处理，有新的epoch则将之前的backlog垃圾回收
 func (b *backlog) process() {
 	logger.Debug().Msg("Starting backlog.")
 
@@ -122,6 +131,7 @@ func (b *backlog) process() {
 	}
 }
 
+// 添加新msg等待处理
 func (b *backlog) appendToBacklog(msg *pb.ProtocolMessage) {
 	// If the message is from a previous epoch discard it
 	if msg.Sn <= b.epochLast {
@@ -153,6 +163,7 @@ func (b *backlog) appendToBacklog(msg *pb.ProtocolMessage) {
 	b.backlog[msg.Sn] = entry
 }
 
+// 有新的subscriber 那么就把backlog考一份给他
 func (b *backlog) dispatchToInstance(s backlogSubscriber) {
 	logger.Debug().
 		Int("segID", s.segment.SegID()).
@@ -174,6 +185,7 @@ func (b *backlog) dispatchToInstance(s backlogSubscriber) {
 	}
 }
 
+// 新epoch  准备回收旧的backlog
 func (b *backlog) garbageCollect(epochLast int32) {
 	b.epochLast = epochLast
 	for sn, _ := range b.backlog {

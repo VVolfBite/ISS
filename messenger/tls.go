@@ -27,6 +27,7 @@ import (
 // Configures a TLS connection.
 // This function is used for both the client and the server part of the connection.
 // Returns a TLS configuration to be used when creating a network connection (direct or through gRPC).
+// 配置tls证书
 func ConfigureTLS(certFile string, keyFile string) *tls.Config {
 
 	// Load key pair / certificate of this node.

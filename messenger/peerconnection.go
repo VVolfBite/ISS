@@ -49,6 +49,7 @@ type LockedSimpleConnection struct {
 	closed          bool
 }
 
+// 有优先级的实际有两个锁以实现优先
 func NewLockedSimpleConnection(msgSink pb.Messenger_ListenClient,
 	priorityMsgSink pb.Messenger_ListenClient) *LockedSimpleConnection {
 	if priorityMsgSink != nil {

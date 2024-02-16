@@ -35,6 +35,7 @@ import (
 // For each sequence number in each Segment received from the Manager, the leader (defined to be the first node in the
 // Segment's leader list, never changes) sends a single message with dummy data to the followers. A follower receiving
 // such a message directly announces a log Entry with that data as the decision for that sequence number.
+// 一个测试庄Orderer，leader直接提议，follower直接提交
 type DummyOrderer struct {
 
 	// Channel to which the Manager pushes new Segments.
@@ -51,6 +52,7 @@ func (do *DummyOrderer) HandleMessage(msg *pb.ProtocolMessage) {
 	senderID := msg.SenderId
 
 	// Check the tye of the message.
+	// 这里本应根据类型进行相关操作的
 	switch m := msg.Msg.(type) {
 	case *pb.ProtocolMessage_Dummy:
 
@@ -65,8 +67,10 @@ func (do *DummyOrderer) HandleMessage(msg *pb.ProtocolMessage) {
 		tracing.MainTrace.Event(tracing.PREPREPARE, int64(dummyMsg.Sn), 0)
 
 		// Process requests in the received message
+		// 从收到的协议信息直接解析出Req并装成Batch 
 		batch := &request.Batch{Requests: make([]*request.Request, len(dummyMsg.Batch.Requests), len(dummyMsg.Batch.Requests))}
 		for i, reqMsg := range dummyMsg.Batch.Requests {
+			// 这里本应该是检查是否有空Req，即共识失败了
 			if req := request.AddReqMsg(reqMsg); req == nil {
 				logger.Warn().
 					Int32("sn", dummyMsg.Sn).
@@ -85,9 +89,9 @@ func (do *DummyOrderer) HandleMessage(msg *pb.ProtocolMessage) {
 				batch.Requests[i] = req
 			}
 		}
-
+		// 从桶拿出Req，表示共识结束
 		request.RemoveBatch(batch)
-
+		// 提交
 		// Announce decision.
 		announcer.Announce(&log.Entry{Sn: dummyMsg.Sn, Batch: dummyMsg.Batch})
 	default:
@@ -98,11 +102,13 @@ func (do *DummyOrderer) HandleMessage(msg *pb.ProtocolMessage) {
 
 }
 
+// 不处理Entry
 func (do *DummyOrderer) HandleEntry(entry *log.Entry) {
 	panic("DummyOrderer does not yet implement HandleEntry().")
 }
 
 // Initializes the DummyOrderer by subscribing to new segments issued by the Manager.
+// 初始化，即获取segment信息
 func (do *DummyOrderer) Init(mngr manager.Manager) {
 	do.segmentChan = mngr.SubscribeOrderer()
 	// TODO initialize a backlog to store messages that arrive before the orderer starts
@@ -112,6 +118,7 @@ func (do *DummyOrderer) Init(mngr manager.Manager) {
 // handle each of them.
 // Meant to be run as a separate goroutine.
 // Decrements the provided wait group when done.
+// 开始，任务是不断处理seg
 func (do *DummyOrderer) Start(wg *sync.WaitGroup) {
 	defer wg.Done()
 
@@ -131,11 +138,13 @@ func (do *DummyOrderer) Start(wg *sync.WaitGroup) {
 
 // Runs the dummy ordering algorithm for a Segment.
 // The algorithm only consists of the leader sending a proposal to the followers (which accept it unconditionally).
+// 开始共识部分
 func (do *DummyOrderer) runSegment(seg manager.Segment) {
 
 	logger.Info().Int("segID", seg.SegID()).Msg("Running segment.")
 
 	// If I am the leader
+	// 本来应该分为leader和follower两个
 	if do.leading(seg) {
 
 		// Wait until the log progressed far enough
@@ -155,6 +164,7 @@ func (do *DummyOrderer) runSegment(seg manager.Segment) {
 
 // Returns true if this node is the leader of a segment.
 // In dummy ordering, the first node of the leader list is always the leader.
+// 判断自己是否为leader
 func (do *DummyOrderer) leading(seg manager.Segment) bool {
 	return seg.Leaders()[0] == membership.OwnID
 }
@@ -169,6 +179,7 @@ func (do *DummyOrderer) proposeSN(segment manager.Segment, sn int32) {
 	batch := segment.Buckets().CutBatch(config.Config.BatchSize, config.Config.BatchTimeout)
 
 	// Create message
+	
 	orderMsg := &pb.ProtocolMessage{
 		SenderId: membership.OwnID,
 		Msg: &pb.ProtocolMessage_Dummy{Dummy: &pb.DummyOrdererMsg{
@@ -190,10 +201,12 @@ func (do *DummyOrderer) proposeSN(segment manager.Segment, sn int32) {
 	}
 }
 
+// 签名，返回签名，若有问题返回错误
 func (do *DummyOrderer) Sign(data []byte) ([]byte, error) {
 	return nil, nil
 }
 
+// 检查签名，若有问题返回错误
 func (do *DummyOrderer) CheckSig(data []byte, senderID int32, signature []byte) error {
 	return nil
 }

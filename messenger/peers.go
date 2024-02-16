@@ -44,10 +44,12 @@ const (
 var Crashed = false
 
 // Channels holding protocol messages to be sent to nodes, indexed by destination node ID.
+// 存储着与该节点相连的Peer
 var peerConnections = make(map[int32]PeerConnection)
 
 // Message handlers. These variables hold functions the messenger calls on reception of messages of the corresponding
 // type. Modules using the messenger must assign functions to these variables before the messenger is started (Start())
+// 用于处理Checkpoint信息Req，Resp处理； 跟进状态处理；共识处理的三个handler
 var CheckpointMsgHandler func(msg *pb.CheckpointMsg, senderID int32)
 var StateTransferMsgHandler func(msg *pb.ProtocolMessage)
 var OrdererMsgHandler func(msg *pb.ProtocolMessage)
@@ -68,6 +70,8 @@ type messengerServer struct {
 // Receives messages from the gRPC client running on the other node and dispatches them to the appropriate module by
 // calling the corresponding handler function. The handler functions must have been set by the modules before the
 // server started.
+// 监听接入地址和信息，接受信息并转交给相关的handler处理
+//	checkForHotstuffProposal似乎没有实际的用处，除了log Hotstuff共识情况
 func (ms *messengerServer) Listen(srv pb.Messenger_ListenServer) error {
 
 	// Log address of incoming connection.
@@ -100,6 +104,7 @@ func (ms *messengerServer) Listen(srv pb.Messenger_ListenServer) error {
 
 // Dispatch message to the appropriate module by calling the corresponding handler.
 // Unpack message batches and dispatch each message separately.
+// 显然，这个函数就是一个多分支函数，将信息按类型交给相关的handler，也是节点获取信息的最外层
 func handleMessage(msg *pb.ProtocolMessage, srv pb.Messenger_ListenServer) (finished bool) {
 
 	// WARNING: If a simulate crash, the peer ignores all messages
@@ -141,6 +146,7 @@ func handleMessage(msg *pb.ProtocolMessage, srv pb.Messenger_ListenServer) (fini
 // Starts the messenger by instantiating a gRPC server that listens to connections from other nodes.
 // Meant to be run as a separate goroutine.
 // Decrements the provided wait group when done.
+// 开启grpc服务器并开始监听进入的连接，前部分代码在配置grpc连接，后部分则持续监听
 func Start(wg *sync.WaitGroup) {
 	defer wg.Done()
 
@@ -182,6 +188,7 @@ func Start(wg *sync.WaitGroup) {
 
 // Establishes (in parallel) network connections to all peers in the system.
 // TODO: Deal with errors, e.g. when the connection times out (make sure the RPC call in connectToPeer() has a timeout).
+// 主动与网络所有节点建立连接，应该在discovery后进行
 func Connect() {
 
 	// Get list of all peer IDs (this is a copy of the list maintained by the membership package, so we can modify it.)
@@ -246,6 +253,7 @@ func Connect() {
 // concurrently with the same destNodeID.
 // If outgoing messages are not buffered and no priority is used (see PriorityConnection in config file),
 // also must not be called concurrently with EnqueuePriorityMessage with the same destNodeID.
+// 向节点destodeId发送信息msg，显然是节点最外层的发送信息方法
 func EnqueueMsg(msg *pb.ProtocolMessage, destNodeID int32) {
 
 	// WARNING: If a simulate crash, the peer ignores all messages
@@ -267,6 +275,7 @@ func EnqueueMsg(msg *pb.ProtocolMessage, destNodeID int32) {
 // concurrently with the same destNodeID.
 // If outgoing messages are not buffered and no priority is used (see PriorityConnection in config file),
 // also must not be called concurrently with EnqueueMessage with the same destNodeID.
+// 向节点destodeId发送存在优先级的信息
 func EnqueuePriorityMsg(msg *pb.ProtocolMessage, destNodeID int32) {
 
 	// WARNING: If a simulate crash, the peer ignores all messages
@@ -289,6 +298,7 @@ func EnqueuePriorityMsg(msg *pb.ProtocolMessage, destNodeID int32) {
 // priority messages will be sent through the same network connection(s).
 // If OutMessageBufSize is configured > 0, all messages submitted to the returned PeerConnection will be first placed
 // in a buffered channel and a separate background thread will send them on the network.
+// 向节点nodeId建立连接并将连接保存在peerConnections中
 func connectToPeer(nodeID int32) PeerConnection {
 	// Get network address of peer to which we connect.
 	// We use the private address of the other peer.
@@ -341,7 +351,7 @@ func connectToPeer(nodeID int32) PeerConnection {
 		return connection
 	}
 }
-
+// 创建并测试连接，可以测算流量带宽等
 func createTestedConnections(addrString string, dialOpts []grpc.DialOption, nodeID int32) ([]pb.Messenger_ListenClient, []pb.Messenger_ListenClient) {
 	// Initialize list of gRPC message sinks
 	numConnections := config.Config.BasicConnections + config.Config.PriorityConnections + config.Config.ExcessConnections
@@ -427,6 +437,7 @@ func createTestedConnections(addrString string, dialOpts []grpc.DialOption, node
 	return basicMsgSinks, priorityMsgSinks
 }
 
+// 调用createConnection完成节点的批量连接（似乎是两个节点间建立多个连接）
 func createConnections(addrString string, dialOpts []grpc.DialOption, nodeID int32) ([]pb.Messenger_ListenClient, []pb.Messenger_ListenClient) {
 
 	numConnections := config.Config.BasicConnections + config.Config.PriorityConnections
@@ -459,6 +470,7 @@ func createConnections(addrString string, dialOpts []grpc.DialOption, nodeID int
 
 // Creates a single connection to a peer at address addr, using options provided as dialOpts.
 // Returns a new Protobuf client stub for sending messages on this connection.
+// 向节点创建连接，使用远程调用对方listen，因为listen返回的是对方的发送信息池，相当于获取了响应信息
 func createConnection(addr string, dialOpts []grpc.DialOption) pb.Messenger_ListenClient {
 
 	// Set up a gRPC connection.
@@ -483,7 +495,7 @@ func createConnection(addr string, dialOpts []grpc.DialOption) pb.Messenger_List
 	// Return the message sing connected to the peer.
 	return msgSink
 }
-
+// 串行测试连接
 func testConnections(clients []pb.Messenger_ListenClient) []*connectionTest {
 
 	// Initialize bandwidths slice
@@ -497,6 +509,7 @@ func testConnections(clients []pb.Messenger_ListenClient) []*connectionTest {
 	return tests
 }
 
+// 并行测试连接，开始线程执行testConnection
 func testConnectionsParallel(clients []pb.Messenger_ListenClient) []*connectionTest {
 
 	resultChan := make(chan *connectionTest)
@@ -518,6 +531,7 @@ func testConnectionsParallel(clients []pb.Messenger_ListenClient) []*connectionT
 
 }
 
+// 测算带宽
 func approximateTotalBandwidth(tests []*connectionTest) int {
 
 	// Get minimal test duration

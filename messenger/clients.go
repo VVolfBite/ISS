@@ -31,6 +31,7 @@ import (
 )
 
 var (
+	// 记录了与该节点相连的客户信息
 	clientConnections sync.Map
 
 	// Synchronizes access to bucketSubscriptions and bucketAssignmentMsg.
@@ -40,15 +41,18 @@ var (
 	bucketSubscriptions  = make(map[int32]pb.Messenger_BucketsServer)
 	bucketAssignmentMsg  *pb.BucketAssignment
 
+	// requesthandler应该由服务器在远程调用服务提供前指定好handler模块
 	ClientRequestHandler func(msg *pb.ClientRequest)
 )
 
 // Implementation of the gRPC Request service (multi-request-multi-response) used by ordering clients.
 // On first client request (that it considers dummy and doesn't process normally), performs a handshake with the
 // client. Submits all subsequent requests to the registered handler function.
+// 这个应该是提供给客户的grpc连接方法 request 发起请求
 func (ms *messengerServer) Request(srv pb.Messenger_RequestServer) error {
 
 	// WARNING: If a simulate crash, the peer ignores all messages
+	// 模拟Crash
 	if Crashed {
 		return nil
 	}
@@ -66,9 +70,11 @@ func (ms *messengerServer) Request(srv pb.Messenger_RequestServer) error {
 	var req *pb.ClientRequest
 
 	// Exchange a dummy request and a dummy response with the client.
+	// 节点与客户handshake初始化数据
 	err = ms.performClientHandshake(srv)
 
 	// Call the handler for each request received from the client
+	// 服务器开始处理接收到的client信息
 	for req, err = srv.Recv(); err == nil; req, err = srv.Recv() {
 		logger.Trace().
 			Int32("clId", req.RequestId.ClientId).
@@ -85,6 +91,7 @@ func (ms *messengerServer) Request(srv pb.Messenger_RequestServer) error {
 	return err
 }
 
+// 向客户提供查询Bucket分配情况的grpc服务
 func (ms *messengerServer) Buckets(msgSink pb.Messenger_BucketsServer) error {
 
 	// The client always starts by sending one subscription.
@@ -116,6 +123,7 @@ func (ms *messengerServer) Buckets(msgSink pb.Messenger_BucketsServer) error {
 	return nil
 }
 
+// 更新用于响应客户的桶分配响应内容（这个函数会被manger调用吧 但是为什么定义在这里了）
 func AnnounceBucketAssignment(assignment *pb.BucketAssignment) {
 	bucketAssignmentLock.Lock()
 	defer bucketAssignmentLock.Unlock()
@@ -137,6 +145,7 @@ func AnnounceBucketAssignment(assignment *pb.BucketAssignment) {
 // The client is expected to send one dummy request, on the reception of which the peer initializes the required
 // client-related data structures. The peer then responds with a dummy response, indicating to the client that the
 // peer is ready to send actual responses to actual requests.
+// 用于初始化Client和Server的连接，客户使用DummyReq以请求服务端初始化相关数据信息，服务器以DummyResp表明完成，应该是客户远程调用
 func (ms *messengerServer) performClientHandshake(srv pb.Messenger_RequestServer) error {
 
 	// Receive first dummy Request from client.
@@ -160,6 +169,7 @@ func (ms *messengerServer) performClientHandshake(srv pb.Messenger_RequestServer
 
 // Saves the client connection in clientConnections.
 // Required for sending responses to the client.
+// 注册用户，就是在clientConnections这个map中加一个clientID映射
 func registerClientConnection(srv pb.Messenger_RequestServer, clientID int32) {
 
 	// Assert that client is not yet registered. This should never happen
@@ -176,6 +186,7 @@ func registerClientConnection(srv pb.Messenger_RequestServer, clientID int32) {
 }
 
 // Sends a response to a client request.
+// 以信息resp响应客户clientID
 func RespondToClient(clientID int32, response *pb.ClientResponse) {
 
 	// WARNING: If a simulate crash, the peer ignores all messages
@@ -203,6 +214,7 @@ func RespondToClient(clientID int32, response *pb.ClientResponse) {
 
 // Creates connections to all the orderers and returns them as a slice of gRPC client stubs.
 // This function is used by the client.
+// 向所有orderer建立grpc连接
 func ConnectToOrderers(ownClientID int32, clientLog zerolog.Logger, ordererIDs []int32) (map[int32]pb.Messenger_RequestClient, map[int32]pb.Messenger_BucketsClient, map[int32]*grpc.ClientConn) {
 
 	var mapLock sync.Mutex
@@ -242,6 +254,7 @@ func ConnectToOrderers(ownClientID int32, clientLog zerolog.Logger, ordererIDs [
 // Connects to a single orderer node and returns a message sink (gRPC stub),
 // through which messages destined to the orderer node can be sent.
 // This function is used by connectToOrderers when the client is connecting to the system.
+// 让客户连接到orderer的grpc服务？
 func connectToOrderer(ordererID int32, ownClientID int32, clientLog zerolog.Logger) (pb.Messenger_RequestClient, pb.Messenger_BucketsClient, *grpc.ClientConn) {
 
 	// Get network address of orderer.
@@ -272,6 +285,7 @@ func connectToOrderer(ordererID int32, ownClientID int32, clientLog zerolog.Logg
 
 	// Remotely invoke the Request function on the orderer's gRPC server.
 	// As this is "stream of requests"-type RPC, it returns a message sink.
+	// 远程调用orderer的Request从而获得发送信息的消息池
 	reqClient, err := reqStub.Request(context.Background())
 	if err != nil {
 		clientLog.Error().Str("addrStr", addrString).Err(err).Msg("Could not invoke Request RPC.")
@@ -283,6 +297,7 @@ func connectToOrderer(ordererID int32, ownClientID int32, clientLog zerolog.Logg
 
 	// Remotely invoke the Request function on the orderer's gRPC server.
 	// As this is "stream of requests"-type RPC, it returns a message sink.
+	// 同理
 	bucketClient, err := bucketStub.Buckets(context.Background())
 	if err != nil {
 		clientLog.Error().Str("addrStr", addrString).Err(err).Msg("Could not invoke Request RPC.")
@@ -297,6 +312,7 @@ func connectToOrderer(ordererID int32, ownClientID int32, clientLog zerolog.Logg
 
 	// Perform an initial handshake with the server, exchanging one dummy request and one dummy response.
 	// TODO: Is this still necessary when using secure connections? (Probably yes.)
+	// 让客户与orderer建立握手完成初始化
 	performServerHandshake(reqClient, ownClientID)
 	clientLog.Info().Int32("id", identity.NodeId).Str("addrStr", addrString).Msg("Connected to orderer.")
 
@@ -304,6 +320,7 @@ func connectToOrderer(ordererID int32, ownClientID int32, clientLog zerolog.Logg
 	return reqClient, bucketClient, reqConn
 }
 
+// 建立grpc连接
 func newGRPCClientConnection(addrString string) (*grpc.ClientConn, error) {
 
 	// Set general gRPC dial options.
@@ -328,6 +345,7 @@ func newGRPCClientConnection(addrString string) (*grpc.ClientConn, error) {
 // Sends a dummy request and waits for a dummy response.
 // This ensures that the server knows about this client and is ready for sending actual responses to actual requests.
 // TODO: Is this still necessary when using secure connections? (Probably yes.)
+// 客户发起handshakeReq ，应该是客户本地调用
 func performServerHandshake(cl pb.Messenger_RequestClient, ownClientID int32) {
 
 	// Send dummy request.
