@@ -28,7 +28,7 @@ batchSizeBytes: BATCHSIZE
 bucketRotationPeriod: EPOCH             # max epoch size in recovery & bucket rotation period in stable mode
 buckets: 2                              # total number of buckets
 
-useTLS: true
+useTLS: false
 
 servers:
   caCertFile: "/root/tls-data/ca.pem"

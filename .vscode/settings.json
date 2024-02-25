@@ -4,7 +4,12 @@
         "Hotstuff",
         "hyperledger",
         "mirbft",
+        "protobuff",
         "protobufs",
+        "protoc",
+        "requesthandler",
+        "rpcs",
+        "statetransfer",
         "zerolog"
     ]
 }

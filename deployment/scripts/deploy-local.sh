@@ -34,6 +34,8 @@ cp -r $local_code_files $exp_data_dir/gopath/src/$downloaded_code_dir/
 cp $GOPATH/bin/orderingpeer $GOPATH/bin/orderingclient $exp_data_dir/gopath/bin/
 
 # Start slaves according to schedule
+echo "exp_data_dir is ${exp_data_dir}"
+echo "deploy_schedule is ${deploy_schedule}"
 scripts/deploy-slaves-local.sh "$exp_data_dir" $deploy_schedule &
 
 echo "Waiting for local experiment to finish."
