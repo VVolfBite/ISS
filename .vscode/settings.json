@@ -1,15 +1,31 @@
 {
     "cSpell.words": [
+        "Additionaly",
+        "bsize",
         "Checkpointer",
+        "cmds",
+        "curr",
         "Hotstuff",
         "hyperledger",
+        "memsize",
+        "micorblocks",
+        "microblock",
+        "Microblock",
+        "microblocks",
         "mirbft",
+        "Msgf",
+        "msize",
+        "mypart",
+        "newblock",
         "protobuff",
         "protobufs",
         "protoc",
+        "pubkey",
+        "reffered",
         "requesthandler",
         "rpcs",
         "statetransfer",
+        "Warningf",
         "zerolog"
     ]
 }

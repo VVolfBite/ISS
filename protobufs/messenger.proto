@@ -48,6 +48,9 @@ message ProtocolMessage {
         MissingEntry missing_entry = 26;
         PbftCatchUp pbft_catchup = 27;
         HotStuffNewView hotstuff_newview = 28;
+        ClientRequest client_request = 29;
+        ClientResponse client_response = 30;
+
     }
 }
 

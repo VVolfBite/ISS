@@ -67,6 +67,7 @@ func main() {
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnixMicro
 	logger.Logger = logger.Output(zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: "15:04:05.000"})
 
+	// 根据命令初始化配置信息
 	if os.Args[1] == "server" {
 		os.Args = os.Args[2:]
 

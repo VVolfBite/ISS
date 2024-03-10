@@ -223,6 +223,7 @@ func Add(req *Request) *Request {
 
 		// Add verified request.
 		// If request cannot be added this time, it is not because of an unverified signature.
+		
 		storedReq, _ = req.Bucket.AddRequest(req)
 	}
 
