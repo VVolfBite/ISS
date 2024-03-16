@@ -1,29 +1,37 @@
 package main
 
 import (
-	"fmt"
-	"log"
+	"os"
 	"time"
-	pb "github.com/hyperledger-labs/mirbft/protobufs"
-	"github.com/hyperledger-labs/mirbft/mypart/clientstub"
+
+	"github.com/golang/protobuf/ptypes/timestamp"
+	clientStub "github.com/hyperledger-labs/mirbft/mypart/clientstub"
 	"github.com/hyperledger-labs/mirbft/mypart/myPeer"
+	pb "github.com/hyperledger-labs/mirbft/protobufs"
+	"github.com/rs/zerolog"
+	"github.com/rs/zerolog/log"
 )
 
-func main() {
+var (
+	client *clientStub.ClientStub
+	peers  []*myPeer.MyPeer
+	reqs   []*pb.ClientRequest
+)
+
+func Init(reqCount int, peerCount int) {
 	// 初始化客户端测试桩
-	client := clientStub.NewClientStub(1) // 这里假设客户端 ID 为 1
+
+	client = clientStub.NewClientStub(1) // 假设客户端 ID 为 1
 
 	// 生成三个客户端请求
-	var reqs []*pb.ClientRequest
-	for i := 0; i < 3; i++ {
+	for i := 0; i < reqCount; i++ {
 		req := client.GenerateRequest()
 		reqs = append(reqs, req)
-		log.Printf("Generated request %d: %+v\n", i+1, req)
+		log.Debug().Msgf("Generated request %d: %+v\n", i+1, req)
 	}
 
 	// 初始化四个对等节点并彼此相互连接
-	var peers []*myPeer.MyPeer
-	for i := 1; i <= 4; i++ {
+	for i := 0; i < peerCount; i++ {
 		p, err := myPeer.NewMyPeer(i)
 		if err != nil {
 			log.Printf("Error creating peer %d: %v\n", i, err)
@@ -31,25 +39,68 @@ func main() {
 		}
 		peers = append(peers, p)
 	}
-
-	// 设置第一个对等节点监听客户端请求并将其广播到其他对等节点
-	go func() {
-		err := peers[0].ConnectToAllPeers(2, 4)
+	// 连接对等节点
+	for i := 0; i < len(peers); i++ {
+		err := peers[i].ConnectToAllPeers(0, peerCount-1)
 		if err != nil {
-			fmt.Printf("Error connecting to peers: %v\n", err)
+			log.Printf("Error connecting to peers from peer %d: %v\n", i, err)
 			return
 		}
-		
-		// 发送三个请求到其他节点
-		for _, req := range reqs {
-			err := peers[0].BroadcastRequest(req)
-			if err != nil {
-				fmt.Printf("Error broadcasting request: %v\n", err)
-				return
-			}
-			time.Sleep(1 * time.Second) // 休眠一秒钟，模拟请求之间的间隔
+		// fmt.Printf("%d",len(peers[i].PeerConnections))
+	}
+}
+
+func testRequestMsg() {
+	// 选择第一个对等节点来广播请求
+	peer := peers[0]
+
+	// 广播请求
+	for _, req := range reqs {
+		err := peer.BroadcastRequest(req)
+		if err != nil {
+			log.Printf("Error broadcasting request: %v\n", err)
+			return
 		}
-	}()
+		// 休眠一段时间，模拟请求之间的间隔
+		time.Sleep(1 * time.Second)
+	}
+}
+
+func testProtocolMsg() {
+	// 创建一个假设的 MicroBlock
+	peer := peers[0]
+	mb := &pb.MicroBlock{
+		ProposalId:      &pb.Identifier{Value: []byte("proposal_id")},
+		Hash:            &pb.Identifier{Value: []byte("hash")},
+		Sender:          1,
+		IsRequested:     true,
+		IsForward:       false,
+		Timestamp:       &timestamp.Timestamp{Seconds: time.Now().Unix(), Nanos: int32(time.Now().Nanosecond())},
+		FutureTimestamp: &timestamp.Timestamp{Seconds: time.Now().Unix(), Nanos: int32(time.Now().Nanosecond())},
+		Hops:            1,
+	}
+	pMsg := &pb.ProtocolMessage{
+		SenderId: int32(peer.Id),
+		Msg: &pb.ProtocolMessage_Microblock{
+			Microblock: mb,
+		},
+	}
+	// 广播 MicroBlock
+
+	// 广播请求
+	err := peer.BroadcastProtocolMsg(pMsg)
+	if err != nil {
+		log.Printf("Error broadcasting request: %v\n", err)
+		return
+	}
+}
+
+func main() {
+	zerolog.SetGlobalLevel(zerolog.DebugLevel)
+	log.Logger = log.Output(zerolog.ConsoleWriter{Out: os.Stderr})
+	Init(3, 10)
+	testRequestMsg()
+	// testProtocolMsg()
 
 	// 阻塞主进程
 	select {}

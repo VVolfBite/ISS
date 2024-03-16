@@ -10,7 +10,9 @@ import "pbftorderer.proto";
 import "hotstufforderer.proto";
 import "raftorderer.proto";
 import "request.proto";
+import "pab.proto";
 import "common.proto";
+
 
 service Messenger {
     rpc Listen(stream ProtocolMessage) returns(stream BandwidthTestAck);
@@ -48,8 +50,11 @@ message ProtocolMessage {
         MissingEntry missing_entry = 26;
         PbftCatchUp pbft_catchup = 27;
         HotStuffNewView hotstuff_newview = 28;
-        ClientRequest client_request = 29;
-        ClientResponse client_response = 30;
+        MicroBlock microblock = 29;
+        Ack microblockAck =30;
+        MissingMBRequest missing_microblock_request = 31;
+        ClientRequest client_request = 32;
+        ClientResponse client_response = 33;
 
     }
 }

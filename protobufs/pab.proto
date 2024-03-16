@@ -1,0 +1,54 @@
+syntax = "proto3";
+
+option go_package = "./;protobufs";
+
+package protobufs;
+
+import "google/protobuf/timestamp.proto";
+
+import "request.proto";
+
+message Identifier {
+    bytes value = 1;
+}
+
+message NodeID {
+    int32 value = 1;
+}
+
+message Signature {
+    bytes value = 1;
+}
+
+message Request {
+    ClientRequest msg = 1;
+    bytes digest = 2;
+    bool verified = 3;
+    bool in_flight = 4;
+}
+
+message MissingMBRequest {
+    NodeID requester_id = 1;
+    Identifier proposal_id = 2;
+    repeated Identifier missing_mb_list = 3;
+}
+
+message MicroBlock {
+    Identifier proposal_id = 1;
+    Identifier hash = 2;
+    repeated Request txns = 3;
+    google.protobuf.Timestamp timestamp = 4;
+    google.protobuf.Timestamp future_timestamp = 5;
+    int32 sender = 6;
+    bool is_requested = 7;
+    bool is_forward = 8;
+    bytes bitmap = 9;
+    int32 hops = 10;
+}
+
+message Ack {
+    int32 receiver = 1;
+    Identifier microblock_id = 2;
+    Signature signature = 3;
+}
+

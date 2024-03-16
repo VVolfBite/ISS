@@ -2,236 +2,340 @@ package mempool
 
 import (
 	"container/list"
-	"fmt"
-	"sync"
-	"log"
-	
-	pb "github.com/hyperledger-labs/mirbft/protobufs"
+	"github.com/hyperledger-labs/mirbft/mypart/microblock"
+	"github.com/hyperledger-labs/mirbft/request"
 	"github.com/hyperledger-labs/mirbft/util"
+	logger "github.com/rs/zerolog/log"
+	"sync"
 )
 
-type MicroBlock struct{
-	mbId *pb.RequestID
-}
-
 type MemPool struct {
-	microblocks   *list.List
-	txnList       *list.List
-	microblockMap map[*pb.RequestID]*MicroBlock
-	bsize         int // number of microblocks in a proposal
-	msize         int // byte size of transactions in a microblock
-	memsize       int // number of microblocks in mempool
-	currSize      int
-	totalTx       int
-	mu            sync.Mutex
+	stableMicroblocks  *list.List
+	txnList            *list.List
+	microblockMap      map[util.Identifier]*microblock.MicroBlock         // 所有存储下来的mb
+	pendingMicroblocks map[util.Identifier]*microblock.PendingMicroblock  // pending 是指还没有收集到足够的ack  处于等待不能用于共识的mb
+	ackBuffer          map[util.Identifier]map[util.NodeID]util.Signature // ack buffer 记录了mb收集到了那些节点的ack签名
+	stableMBs          map[util.Identifier]struct{}                       //stable 是指收集到了足够ack的可以用于共识了的 mb
+	bsize              int                                                // number of microblocks in a proposal
+	msize              int                                                // byte size of transactions in a microblock
+	memsize            int                                                // number of microblocks in mempool
+	currSize           int
+	threshhold         int // number of acks needed for a stable microblock
+	totalTx            int64
+	mu                 sync.Mutex
 }
 
 // NewMemPool creates a new naive mempool
-func NewMemPool(bsize int,msize int, memsize int) *MemPool {
+func NewMemPool() *MemPool {
 	return &MemPool{
-		bsize:         bsize,
-		msize:         msize,
-		memsize:       memsize,
-		microblocks:   list.New(),
-		microblockMap: map[*pb.RequestID]*MicroBlock{},
-		currSize:      0,
-		txnList:       list.New(),
+		// @TODO
+		// bsize:              config.GetConfig().BSize,
+		// msize:              config.GetConfig().MSize,
+		// memsize:            config.GetConfig().MemSize,
+		// threshhold:         config.GetConfig().Q,
+		bsize:              2,
+		msize:              1000,
+		memsize:            5,
+		threshhold:         2,
+		stableMicroblocks:  list.New(),
+		microblockMap:      make(map[util.Identifier]*microblock.MicroBlock),
+		pendingMicroblocks: make(map[util.Identifier]*microblock.PendingMicroblock),
+		ackBuffer:          make(map[util.Identifier]map[util.NodeID]util.Signature),
+		stableMBs:          make(map[util.Identifier]struct{}),
+		currSize:           0,
+		txnList:            list.New(),
 	}
 }
 
 // AddTxn adds a transaction and returns a microblock if msize is reached
 // then the contained transactions should be deleted
-func (nm *MemPool) AddTxn(txn *pb.ClientRequest) (bool, *MicroBlock) {
+func (am *MemPool) AddTxn(txn *request.Request) (bool, *microblock.MicroBlock) {
 	// mempool is full
-	if nm.RemainingTx() >= int(nm.memsize) {
-		log.Printf("mempool's tx list is full")
+	// log.Printf("Txn in mempool %x\n",txn.Digest)
+	if am.RemainingTx() >= int64(am.memsize) {
+		//log.Warningf("mempool's tx list is full")
 		return false, nil
 	}
-	if nm.RemainingMB() >= int(nm.memsize) {
-		log.Printf("mempool's mb list is full")
+	if am.RemainingMB() >= int64(am.memsize) {
+		//log.Warningf("mempool's mb is full")
 		return false, nil
 	}
+	am.totalTx++
 
 	// get the size of the structure. txn is the pointer.
 	tranSize := util.SizeOf(txn)
-	totalSize := tranSize + nm.currSize
+	totalSize := tranSize + am.currSize
+	// logger.Printf("Txn size is %d ,cur mempool size is %d\n, cutting size is %d", tranSize, totalSize, am.msize)
 
-	if tranSize > nm.msize {
-		log.Printf("No memory to hold the txn, as txnsize :%d and msize:%d",tranSize,nm.msize)
+	if tranSize > am.msize {
 		return false, nil
 	}
-	nm.totalTx++
-	if totalSize > nm.msize {
+	if totalSize > am.msize {
 		//do not add the curr trans, and generate a microBlock
 		//set the currSize to curr trans, since it is the only one does not add to the microblock
-		var id *pb.RequestID = txn.RequestId
-		nm.currSize = tranSize
-		// newBlock := blockchain.NewMicroblock(id, nm.makeTxnSlice())
-		newBlock := &MicroBlock{mbId: id}
-		nm.txnList.PushBack(txn)
+		var id util.Identifier
+		am.currSize = tranSize
+		newBlock := microblock.NewMicroblock(id, am.makeTxnSlice())
+		am.txnList.PushBack(txn)
 		return true, newBlock
 
-	} else if totalSize == nm.msize {
+	} else if totalSize == am.msize {
 		//add the curr trans, and generate a microBlock
-		var id *pb.RequestID = txn.RequestId
-		// allTxn := append(nm.makeTxnSlice(), txn)
-		nm.currSize = 0
-		return true, &MicroBlock{mbId: id}
+		var id util.Identifier
+		allTxn := append(am.makeTxnSlice(), txn)
+		am.currSize = 0
+		return true, microblock.NewMicroblock(id, allTxn)
 
 	} else {
-		nm.txnList.PushBack(txn)
-		nm.currSize = totalSize
+		//
+		am.txnList.PushBack(txn)
+		am.currSize = totalSize
 		return false, nil
 	}
 }
 
 // AddMicroblock adds a microblock into a FIFO queue
 // return an err if the queue is full (memsize)
-func (nm *MemPool) AddMicroblock(mb *MicroBlock) error {
-	nm.mu.Lock()
-	defer nm.mu.Unlock()
-	//if nm.microblocks.Len() >= nm.memsize {
+func (am *MemPool) AddMicroblock(mb *microblock.MicroBlock) error {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	//if am.microblocks.Len() >= am.memsize {
 	//	return errors.New("the memory queue is full")
 	//}
-	_, exists := nm.microblockMap[mb.mbId]
+	_, exists := am.microblockMap[mb.Hash]
 	if exists {
 		return nil
 	}
-	nm.microblocks.PushBack(mb)
-	nm.microblockMap[mb.mbId] = mb
+	pm := &microblock.PendingMicroblock{
+		Microblock: mb,
+		AckMap:     make(map[util.NodeID]struct{}),
+	}
+	pm.AckMap[mb.Sender] = struct{}{}
+	am.microblockMap[mb.Hash] = mb
+
+	//check if there are some acks of this microblock arrived before
+	buffer, received := am.ackBuffer[mb.Hash]
+	if received {
+		// if so, add these ack to the pendingblocks
+		for id, _ := range buffer {
+			//am.pendingMicroblocks[mb.Hash].ackMap[ack] = struct{}{}
+			pm.AckMap[id] = struct{}{}
+		}
+		if len(pm.AckMap) >= am.threshhold {
+			if _, exists = am.stableMBs[mb.Hash]; !exists {
+				am.stableMicroblocks.PushBack(mb)
+				am.stableMBs[mb.Hash] = struct{}{}
+				delete(am.pendingMicroblocks, mb.Hash)
+				//log.Debugf("microblock id: %x becomes stable from buffer", mb.Hash)
+			}
+		} else {
+			am.pendingMicroblocks[mb.Hash] = pm
+		}
+	} else {
+		am.pendingMicroblocks[mb.Hash] = pm
+	}
 	return nil
+}
+
+// AddAck adds an ack and push a microblock into the stableMicroblocks queue if it receives enough acks
+func (am *MemPool) AddAck(ack *microblock.Ack) {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	target, received := am.pendingMicroblocks[ack.MicroblockID]
+	//check if the ack arrives before the microblock
+	if received {
+		target.AckMap[ack.Receiver] = struct{}{}
+		if len(target.AckMap) >= am.threshhold {
+			logger.Info().Msgf("One Microblock has received enough acks, current holds %d on Mb %x , ready to propose",len(target.AckMap),target.Microblock.Hash)
+			if _, exists := am.stableMBs[target.Microblock.Hash]; !exists {
+				am.stableMicroblocks.PushBack(target.Microblock)
+				am.stableMBs[target.Microblock.Hash] = struct{}{}
+				delete(am.pendingMicroblocks, ack.MicroblockID)
+			}
+		}
+	} else {
+		//ack arrives before microblock, record the number of ack received before microblock
+		//let the addMicroblock do the rest.
+		_, exist := am.ackBuffer[ack.MicroblockID]
+		if exist {
+			am.ackBuffer[ack.MicroblockID][ack.Receiver] = ack.Signature
+		} else {
+			temp := make(map[util.NodeID]util.Signature, 0)
+			temp[ack.Receiver] = ack.Signature
+			am.ackBuffer[ack.MicroblockID] = temp
+		}
+	}
 }
 
 // GeneratePayload generates a list of microblocks according to bsize
 // if the remaining microblocks is less than bsize then return all
-// func (nm *MemPool) GeneratePayload() *blockchain.Payload {
-// 	var batchSize int
-// 	nm.mu.Lock()
-// 	defer nm.mu.Unlock()
+func (am *MemPool) GeneratePayload() *microblock.Payload {
+	var batchSize int
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	sigMap := make(map[util.Identifier]map[util.NodeID]util.Signature, 0)
 
-// 	if nm.microblocks.Len() >= nm.bsize {
-// 		batchSize = nm.bsize
-// 	} else {
-// 		batchSize = nm.microblocks.Len()
-// 	}
-// 	microblockList := make([]*MicroBlock, 0)
+	if am.stableMicroblocks.Len() >= am.bsize {
+		batchSize = am.bsize
+	} else {
+		batchSize = am.stableMicroblocks.Len()
+	}
+	microblockList := make([]*microblock.MicroBlock, 0)
 
-// 	for i := 0; i < batchSize; i++ {
-// 		mb := nm.front()
-// 		if mb == nil {
-// 			break
-// 		}
-// 		microblockList = append(microblockList, mb)
-// 	}
+	for i := 0; i < batchSize; i++ {
+		mb := am.front()
+		if mb == nil {
+			break
+		}
+		//log.Debugf("microblock id: %x is deleted from mempool when proposing", mb.Hash)
+		microblockList = append(microblockList, mb)
 
-// 	return blockchain.NewPayload(microblockList, nil)
-// }
+		sigs := make(map[util.NodeID]util.Signature, 0)
+		count := 0
+		for id, sig := range am.ackBuffer[mb.Hash] {
+			count++
+			sigs[id] = sig
+			// @TODO
+			// if count == config.Configuration.Q {
+			// 	break
+			// }
+		}
+		sigMap[mb.Hash] = sigs
+	}
+
+	return microblock.NewPayload(microblockList, sigMap) // payload 带有mb以及他们相关的ack收集信息以便向其他人证明信息质量
+}
 
 // CheckExistence checks if the referred microblocks in the proposal exists
 // in the mempool and return missing ones if there's any
 // return true if there's no missing transactions
-// func (nm *MemPool) CheckExistence(p *blockchain.Proposal) (bool, []crypto.Identifier) {
-// 	id := make([]crypto.Identifier, 0)
-// 	return false, id
-// }
 
 // RemoveMicroblock removes reffered microblocks from the mempool
-func (nm *MemPool) RemoveMicroblock(id *pb.RequestID) error {
-	nm.mu.Lock()
-	defer nm.mu.Unlock()
-	_, exists := nm.microblockMap[id]
+func (am *MemPool) RemoveMicroblock(id util.Identifier) error {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	_, exists := am.microblockMap[id]
 	if exists {
-		delete(nm.microblockMap, id)
-		return nil
+		delete(am.microblockMap, id)
 	}
-	return fmt.Errorf("the microblock does not exist, id: %x", id)
+	_, exists = am.stableMBs[id]
+	if exists {
+		delete(am.stableMBs, id)
+	}
+	return nil
 }
 
 // FindMicroblock finds a reffered microblock
-func (nm *MemPool) FindMicroblock(id *pb.RequestID) (bool, *MicroBlock) {
-	nm.mu.Lock()
-	defer nm.mu.Unlock()
-	mb, found := nm.microblockMap[id]
+func (am *MemPool) FindMicroblock(id util.Identifier) (bool, *microblock.MicroBlock) {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	mb, found := am.microblockMap[id]
 	return found, mb
+}
+
+func (am *MemPool) CheckExistence(p *microblock.Proposal) (bool, []util.Identifier) {
+	id := make([]util.Identifier, 0)
+	return false, id
 }
 
 // FillProposal pulls microblocks from the mempool and build a pending block,
 // a pending block should include the proposal, micorblocks that already exist,
 // and a missing list if there's any
-// func (nm *MemPool) FillProposal(p *blockchain.Proposal) *blockchain.PendingBlock {
-// 	nm.mu.Lock()
-// 	defer nm.mu.Unlock()
-// 	existingBlocks := make([]*blockchain.MicroBlock, 0)
-// 	missingBlocks := make(map[crypto.Identifier]struct{}, 0)
-// 	for _, id := range p.HashList {
-// 		block, found := nm.microblockMap[id]
-// 		if found {
-// 			existingBlocks = append(existingBlocks, block)
-// 			for e := nm.microblocks.Front(); e != nil; e = e.Next() {
-// 				// do something with e.Value
-// 				mb := e.Value.(*blockchain.MicroBlock)
-// 				if mb == block {
-// 					nm.microblocks.Remove(e)
-// 					break
-// 				}
-// 			}
-// 		} else {
-// 			missingBlocks[id] = struct{}{}
-// 		}
-// 	}
-// 	return blockchain.NewPendingBlock(p, missingBlocks, existingBlocks)
-// }
-
-func (nm *MemPool) TotalTx() int {
-	return nm.totalTx
+func (am *MemPool) FillProposal(p *microblock.Proposal) *microblock.PendingBlock {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	existingBlocks := make([]*microblock.MicroBlock, 0)
+	missingBlocks := make(map[util.Identifier]struct{}, 0)
+	for _, id := range p.HashList {
+		found := false
+		_, exists := am.pendingMicroblocks[id]
+		if exists {
+			found = true
+			existingBlocks = append(existingBlocks, am.pendingMicroblocks[id].Microblock)
+			delete(am.pendingMicroblocks, id)
+			//log.Debugf("microblock id: %x is deleted from pending when filling", id)
+		}
+		for e := am.stableMicroblocks.Front(); e != nil; e = e.Next() {
+			// do something with e.Value
+			mb := e.Value.(*microblock.MicroBlock)
+			if mb.Hash == id {
+				existingBlocks = append(existingBlocks, mb)
+				found = true
+				am.stableMicroblocks.Remove(e)
+				//log.Debugf("microblock id: %x is deleted from stable when filling", mb.Hash)
+				break
+			}
+		}
+		if !found {
+			missingBlocks[id] = struct{}{}
+		}
+	}
+	return microblock.NewPendingBlock(p, missingBlocks, existingBlocks)
 }
 
-func (nm *MemPool) RemainingTx() int {
-	return int(nm.txnList.Len())
-}
-
-func (nm *MemPool) TotalMB() int {
-	nm.mu.Lock()
-	defer nm.mu.Unlock()
-	return int(len(nm.microblockMap))
-}
-
-func (nm *MemPool) RemainingMB() int {
-	nm.mu.Lock()
-	defer nm.mu.Unlock()
-	return int(nm.microblocks.Len())
-}
-
-// func (nm *MemPool) AddAck(ack *blockchain.Ack) {
-// }
-
-// func (nm *MemPool) AckList(id crypto.Identifier) []identity.NodeID {
-// 	return nil
-// }
-
-func (nm *MemPool) IsStable(id *pb.RequestID) bool {
+func (am *MemPool) IsStable(id util.Identifier) bool {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	_, exists := am.stableMBs[id]
+	if exists {
+		return true
+	}
 	return false
 }
 
-func (nm *MemPool) front() *MicroBlock {
-	if nm.microblocks.Len() == 0 {
+func (am *MemPool) TotalTx() int64 {
+	return am.totalTx
+}
+
+func (am *MemPool) RemainingTx() int64 {
+	return int64(am.txnList.Len())
+}
+
+func (am *MemPool) TotalMB() int64 {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	return int64(len(am.microblockMap))
+}
+
+func (am *MemPool) RemainingMB() int64 {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	return int64(len(am.pendingMicroblocks) + am.stableMicroblocks.Len())
+}
+
+func (am *MemPool) AckList(id util.Identifier) []util.NodeID {
+	am.mu.Lock()
+	defer am.mu.Unlock()
+	pmb, exists := am.pendingMicroblocks[id]
+	if exists {
+		nodes := make([]util.NodeID, 0, len(pmb.AckMap))
+		for k, _ := range pmb.AckMap {
+			nodes = append(nodes, k)
+		}
+		return nodes
+	}
+	return nil
+}
+
+func (am *MemPool) front() *microblock.MicroBlock {
+	if am.stableMicroblocks.Len() == 0 {
 		return nil
 	}
-	ele := nm.microblocks.Front()
-	val, ok := ele.Value.(*MicroBlock)
+	ele := am.stableMicroblocks.Front()
+	val, ok := ele.Value.(*microblock.MicroBlock)
 	if !ok {
 		return nil
 	}
-	nm.microblocks.Remove(ele)
+	am.stableMicroblocks.Remove(ele)
 	return val
 }
 
-// func (nm *MemPool) makeTxnSlice() []*message.Transaction {
-// 	allTxn := make([]*message.Transaction, 0)
-// 	for nm.txnList.Len() > 0 {
-// 		e := nm.txnList.Front()
-// 		allTxn = append(allTxn, e.Value.(*message.Transaction))
-// 		nm.txnList.Remove(e)
-// 	}
-// 	return allTxn
-// }
+func (am *MemPool) makeTxnSlice() []*request.Request {
+	allTxn := make([]*request.Request, 0)
+	for am.txnList.Len() > 0 {
+		e := am.txnList.Front()
+		allTxn = append(allTxn, e.Value.(*request.Request))
+		am.txnList.Remove(e)
+	}
+	return allTxn
+}
