@@ -8,7 +8,7 @@ import (
 	"github.com/hyperledger-labs/mirbft/messenger"
 	pb "github.com/hyperledger-labs/mirbft/protobufs"
 	"github.com/hyperledger-labs/mirbft/util"
-	logger "github.com/rs/zerolog/log"
+	// logger "github.com/rs/zerolog/log"
 )
 
 type MemPool struct {
@@ -178,7 +178,6 @@ func (pool *MemPool) AddAck(ack *Ack) {
 		target.AckMap[ack.Receiver] = struct{}{}
 		if len(target.AckMap) >= pool.threshhold {
 			// logger.Info().Msgf("One Microblock has received enough acks, current holds %d on Mb %x , ready to propose", len(target.AckMap), target.Microblock.Hash)
-			// logger.Info().Msgf("One Microblock has received enough acks, current holds %v on Mb %x , ready to propose", target.AckMap, target.Microblock.Hash)
 			if _, exists := pool.stableMBs[target.Microblock.Hash]; !exists {
 				pool.stableMicroblocks.PushBack(target.Microblock)
 				pool.stableMBs[target.Microblock.Hash] = struct{}{}
