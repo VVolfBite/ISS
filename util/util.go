@@ -51,6 +51,11 @@ func BytesToIdentifier(bytes []byte) Identifier {
     copy(id[:], bytes)
     return id
 }
+
+func IdentifierToBytes(id Identifier) []byte {
+    return id[:]
+}
+
 type Signature []byte;
 type Identifier [32]byte;
 type NodeID int;

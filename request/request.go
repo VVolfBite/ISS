@@ -18,11 +18,12 @@ import (
 	"encoding/binary"
 	"sync"
 
-	logger "github.com/rs/zerolog/log"
 	"github.com/hyperledger-labs/mirbft/config"
 	"github.com/hyperledger-labs/mirbft/crypto"
 	"github.com/hyperledger-labs/mirbft/membership"
 	pb "github.com/hyperledger-labs/mirbft/protobufs"
+	"github.com/hyperledger-labs/mirbft/util"
+	logger "github.com/rs/zerolog/log"
 )
 
 var (
@@ -56,6 +57,12 @@ var (
 
 	// Function used for verifying request batches. Set during initialization.
 	batchVerifierFunc func(*Batch) bool
+
+	MissingCounts   map[int32]int
+	MissingMBs      map[util.Identifier]util.Identifier          // 缺失的mb，即所有 pending block的快速映射
+	ReceivedMBs     map[util.Identifier]struct{}                 // 收到的mb
+	RMBmu			sync.Mutex									// 保护线程安全所需要的锁
+	PendingBlockMap map[util.Identifier]*PendingBlock // pending block 是对fill proposal后仍有mb没有获取需要retrive的的block的称呼
 )
 
 type watermarkRange struct {
@@ -67,6 +74,11 @@ type watermarkRange struct {
 // Cannot be part of the init() function, as the configuration file is not yet loaded when init() is executed.
 // 初始化Req的输入和验证通道
 func Init() {
+
+	MissingCounts = make(map[int32]int)
+	MissingMBs = make(map[util.Identifier]util.Identifier)
+	ReceivedMBs = make(map[util.Identifier]struct{})
+	PendingBlockMap =make(map[util.Identifier]*PendingBlock)
 
 	// Initializes the Buckets.
 	Buckets = make([]*Bucket, config.Config.NumBuckets)

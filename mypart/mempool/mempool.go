@@ -146,7 +146,7 @@ func (am *MemPool) AddAck(ack *microblock.Ack) {
 	if received {
 		target.AckMap[ack.Receiver] = struct{}{}
 		if len(target.AckMap) >= am.threshhold {
-			logger.Info().Msgf("One Microblock has received enough acks, current holds %d on Mb %x , ready to propose",len(target.AckMap),target.Microblock.Hash)
+			// logger.Info().Msgf("One Microblock has received enough acks, current holds %d on Mb %x , ready to propose",len(target.AckMap),target.Microblock.Hash)
 			if _, exists := am.stableMBs[target.Microblock.Hash]; !exists {
 				am.stableMicroblocks.PushBack(target.Microblock)
 				am.stableMBs[target.Microblock.Hash] = struct{}{}

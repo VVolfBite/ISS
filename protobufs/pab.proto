@@ -29,8 +29,9 @@ message Request {
 
 message MissingMBRequest {
     NodeID requester_id = 1;
-    Identifier proposal_id = 2;
-    repeated Identifier missing_mb_list = 3;
+    int32    bucket_id = 2;
+    Identifier proposal_id = 3;
+    repeated Identifier missing_mb_list = 4;
 }
 
 message MicroBlock {
@@ -44,11 +45,13 @@ message MicroBlock {
     bool is_forward = 8;
     bytes bitmap = 9;
     int32 hops = 10;
+    int32 bucket_id = 11;
 }
 
 message Ack {
     int32 receiver = 1;
     Identifier microblock_id = 2;
     Signature signature = 3;
+    int32    bucket_id = 4;
 }
 

@@ -16,7 +16,7 @@
 Logging: "debug" # Zerolog level. One of {trace, debug, info, warning, error}
 
 # Communication channel config
-UseTLS: true                # Use TLS for both peer-to-peer and client-to-peer communication
+UseTLS: false                # Use TLS for both peer-to-peer and client-to-peer communication
                             # The 3 options below are ignored if UseTLS is set to false.
 CACertFile: "tls-data/ca.pem"
 KeyFile: "tls-data/auth.key"
@@ -87,7 +87,7 @@ DefaultLeaderBan: 2         # The default number of epochs a node is excluded fr
                             # Applies only to {Backoff, Combined} leader selection policies.
 
 # Orderer config
-NumBuckets: 16              # Total number of buckets. Should be at least as many as the number of potential leaders.
+NumBuckets: 8              # Total number of buckets. Should be at least as many as the number of potential leaders.
 BatchSize: 40               # Maximum number of requests per batch
 BatchTimeout: 50            # Timeout (ms) to cut batch when the bucket has less requests than the BatchSize.
 

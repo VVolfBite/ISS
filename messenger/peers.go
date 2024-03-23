@@ -53,6 +53,7 @@ var peerConnections = make(map[int32]PeerConnection)
 var CheckpointMsgHandler func(msg *pb.CheckpointMsg, senderID int32)
 var StateTransferMsgHandler func(msg *pb.ProtocolMessage)
 var OrdererMsgHandler func(msg *pb.ProtocolMessage)
+var PABMsgHandler func(msg *pb.ProtocolMessage)
 
 type connectionTest struct {
 	MsgSink         pb.Messenger_ListenClient
@@ -132,6 +133,12 @@ func handleMessage(msg *pb.ProtocolMessage, srv pb.Messenger_ListenServer) (fini
 				logger.Error().Err(err).Int32("peerId", msg.SenderId).Msg("Failed to acknowledge bandwidth test message.")
 			}
 		}
+	case *pb.ProtocolMessage_Microblock:
+		PABMsgHandler(msg)
+	case *pb.ProtocolMessage_MicroblockAck:
+		PABMsgHandler(msg)
+	case *pb.ProtocolMessage_MissingMicroblockRequest:
+		PABMsgHandler(msg)
 	case *pb.ProtocolMessage_Close:
 		logger.Info().Int32("peerId", msg.SenderId).Msg("Connection closed by gRPC client.")
 		return true
@@ -260,7 +267,7 @@ func EnqueueMsg(msg *pb.ProtocolMessage, destNodeID int32) {
 	if Crashed {
 		return
 	}
-
+	// 用 -1 作为广播识别方案
 	if peerConnections[destNodeID] == nil {
 		logger.Error().Int32("nodeID", destNodeID).Msg("Cannot enqueue message. Node not connected.")
 	} else {

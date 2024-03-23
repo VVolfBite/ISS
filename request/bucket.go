@@ -19,10 +19,10 @@ import (
 	"fmt"
 	"sync"
 
-	"github.com/rs/zerolog"
-	logger "github.com/rs/zerolog/log"
 	"github.com/hyperledger-labs/mirbft/config"
 	"github.com/hyperledger-labs/mirbft/tracing"
+	"github.com/rs/zerolog"
+	logger "github.com/rs/zerolog/log"
 )
 
 // Represents a single bucket of client requests.
@@ -68,12 +68,17 @@ type Bucket struct {
 	// Pointer to the end necessary for using the list as a FIFO queue.
 	// If set to nil, no requests are in the bucket (and FirstRequest also must be nil).
 	LastRequest *Request
+
+	// 内存池，用于存储部分Req并制作为Mb以开启PABg
+	Mempool *MemPool
 }
 
 func NewBucket(id int) *Bucket {
+
 	return &Bucket{
 		id:       id,
 		reqIndex: make(map[int64]*Request),
+		Mempool:  NewMemPool(id),
 	}
 }
 
@@ -147,7 +152,6 @@ func (b *Bucket) addNoLock(newReq *Request) (*Request, bool) {
 
 	// Look up request (in the bucket)
 	oldReq, ok := b.reqIndex[reqID]
-
 	// If Request with same digest already is in the bucket, return that Request
 	if ok && bytes.Compare(oldReq.Digest, newReq.Digest) == 0 {
 
@@ -168,7 +172,6 @@ func (b *Bucket) addNoLock(newReq *Request) (*Request, bool) {
 
 		// The request already present has not yet been verified (and verification is enabled).
 	} else if ok {
-
 		// If the new request is verified, replace old request.
 		// (No need to check the old request's signature.)
 		if newReq.Verified {
@@ -188,7 +191,6 @@ func (b *Bucket) addNoLock(newReq *Request) (*Request, bool) {
 
 			// If the new request is not verified, request retrying with verified request
 		} else {
-
 			logger.Trace().
 				Int("bucketId", b.id).
 				Int("len", b.Len()).
@@ -215,10 +217,9 @@ func (b *Bucket) addNoLock(newReq *Request) (*Request, bool) {
 			//	Int32("clId", clID).
 			//	Int32("clSn", clSN).
 			//	Msg("Adding new request to bucket.")
-
 			b.append(newReq)
 			b.reqIndex[reqID] = newReq
-
+			b.Mempool.AddReq(newReq)
 			// If the Bucket is part of a BucketGroup that is waiting for more requests to arrive,
 			// notify the BucketGroup.
 			if b.Group != nil {
@@ -354,10 +355,12 @@ func (b *Bucket) Remove(reqs []*Request) {
 
 // Removes a request from the bucket without acquiring the bucket lock.
 // ATTENTION: Does not (and must not) remove the request from the index.
-//            The index can be cleaned up only after the client watermarks have been updated,
-//            to prevent the situation where, in the same epoch, a request is received from a leader,
-//            added to the bucket, committed and removed from the bucket, and then added again after a late reception
-//            from the client.
+//
+//	The index can be cleaned up only after the client watermarks have been updated,
+//	to prevent the situation where, in the same epoch, a request is received from a leader,
+//	added to the bucket, committed and removed from the bucket, and then added again after a late reception
+//	from the client.
+//
 // ATTENTION: Bucket must be LOCKED when calling this method.
 func (b *Bucket) removeNoLock(req *Request) {
 

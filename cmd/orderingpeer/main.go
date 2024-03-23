@@ -126,6 +126,7 @@ func main() {
 	messenger.OrdererMsgHandler = ord.HandleMessage
 	messenger.ClientRequestHandler = request.HandleRequest
 	messenger.StateTransferMsgHandler = statetransfer.HandleMessage
+	messenger.PABMsgHandler = request.HandlePABMsg
 	statetransfer.OrdererEntryHandler = ord.HandleEntry
 
 	// Create wait group for all the modules that will run as separate goroutines.
