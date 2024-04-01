@@ -19,9 +19,10 @@ import (
 	"sync/atomic"
 	"time"
 
-	logger "github.com/rs/zerolog/log"
 	"github.com/hyperledger-labs/mirbft/config"
 	"github.com/hyperledger-labs/mirbft/membership"
+	"github.com/hyperledger-labs/mirbft/util"
+	logger "github.com/rs/zerolog/log"
 )
 
 type BucketGroup struct {
@@ -32,7 +33,7 @@ type BucketGroup struct {
 
 	// Total number of requests in the buckets.
 	// Must be read / updated atomically when requests are being added to buckets and not all buckets are locked.
-	totalRequests int32
+	totalStableMicroBlock int32
 
 	// When CutBatch() has been called but the Buckets have fewer than BatchSize requests in total, CutBatch() blocks.
 	// Before blocking, it sets cutThreshold to the number of requests it is waiting for.
@@ -77,12 +78,12 @@ func NewBucketGroup(bucketIDs []int) *BucketGroup {
 	}
 
 	return &BucketGroup{
-		buckets:            bucketList,
-		totalRequests:      0,
-		cutThreshold:       -1,
-		timer:              nil,
-		batchTrigger:       make(chan struct{}),
-		nextBatchTimestamp: 0,
+		buckets:               bucketList,
+		totalStableMicroBlock: 0,
+		cutThreshold:          -1,
+		timer:                 nil,
+		batchTrigger:          make(chan struct{}),
+		nextBatchTimestamp:    0,
 	}
 }
 
@@ -90,7 +91,8 @@ func NewBucketGroup(bucketIDs []int) *BucketGroup {
 // Blocks until the Buckets contain at least size requests, but at most for the duration of timeout.
 // On timeout, returns a batch with all requests in the Buckets, even if all the Buckets are empty.
 // 从组的桶剪出一个Batch
-func (bg *BucketGroup) CutBatch(size int, timeout time.Duration) *Batch {
+func (bg *BucketGroup) CutBatch(size int, timeout time.Duration, sn int32) *Batch {
+	
 	alreadyWaited := bg.waitMinimum()
 	bg.lockBuckets()
 	defer bg.unlockBuckets()
@@ -98,10 +100,16 @@ func (bg *BucketGroup) CutBatch(size int, timeout time.Duration) *Batch {
 	// Wait for batch to fill or for the timeout to fire.
 	// May release and re-acquire the bucket locks before returning.
 	// 先等待再切Batch
-	bg.waitForRequestsLocked(size, timeout-time.Duration(alreadyWaited)*time.Nanosecond)
+	
+	bg.waitForStableMicroBlockLocked(size, timeout-time.Duration(alreadyWaited)*time.Nanosecond)
 
 	// Create new request batch
-	newBatch := Batch{Requests: make([]*Request, 0, size)}
+	newBatch := Batch{
+		MBHashList: make([][]byte, 0), 
+		SigMap: make(map[util.Identifier]map[int32][]byte), 
+		BucketId: -1,
+		Sn: int(sn),
+	}
 
 	// If the bucket group is empty (contains no buckets), return an empty batch.
 	// (This is a corner case that should not occur with a reasonable configuration.)
@@ -112,32 +120,29 @@ func (bg *BucketGroup) CutBatch(size int, timeout time.Duration) *Batch {
 
 	// Calculate the initial number of Requests that can be fairly taken from each Bucket.
 	// (Requests from each Bucket must have the chance to make it in the Batch.)
+	// 这里为了后续方便处理，我们这样做： 选出一个含有stableMB最多的 然后进行Cut，而非多个桶各个cut一部分
+	
 	var initCut = 0
-	if size <= int(bg.totalRequests) {
-		initCut = size / len(bg.buckets)
-	} else {
-		initCut = int(bg.totalRequests) / len(bg.buckets)
-	}
-
-	// Add initial requests to the batch.
-	for _, b := range bg.buckets {
-		newBatch.Requests = b.RemoveFirst(initCut, newBatch.Requests)
-	}
-
-	// Fill rest of the batch with any requests, iterating over all buckets.
-	for _, b := range bg.buckets {
-
-		// If we are still missing some requests
-		if len(newBatch.Requests) < size {
-			// Add up to the missing number of requests (size - len(newBatch.Requests)).
-			newBatch.Requests = b.RemoveFirst(size-len(newBatch.Requests), newBatch.Requests)
-
-			// Stop iterating over buckets if enough requests were collected.
-		} else {
-			break
+	var initIndex = 0
+	var maxNum = 0
+	var maxIndex = 0
+	for index, bucket := range bg.buckets {
+		if len(bucket.Mempool.stableMBs) >= maxNum {
+			maxNum = len(bucket.Mempool.stableMBs)
+			maxIndex = index
 		}
 	}
-
+	
+	if size <= maxNum {
+		initCut = size
+		initIndex = maxIndex
+	} else {
+		initCut = maxNum
+		initIndex = maxIndex
+	}
+	
+	// Add initial requests to the batch.
+	newBatch = bg.buckets[initIndex].GetBatchAndRemoveReq(initCut, newBatch)
 	// TODO: Possible optimization (but probably irrelevant):
 	//       We could mark requests as "in flight" here, instead of outside of this function.
 
@@ -145,50 +150,52 @@ func (bg *BucketGroup) CutBatch(size int, timeout time.Duration) *Batch {
 	// This enforces a limit on the rate batch data is being put on the wire.
 	// If, for some reason, too many batches are sent concurrently (e.g. when the bucket is very full),
 	// all of them will be slow, increasing the likelihood of timeouts.
-	totalReq := len(newBatch.Requests) * membership.NumNodes()
+	totalMB := len(newBatch.MBHashList) * membership.NumNodes()
 	if config.Config.LeaderPolicy == "Single" {
-		totalReq /= membership.NumNodes() // For Single leader policy, use the raw throughput cap, not adjusted to system size.
+		totalMB /= membership.NumNodes() // For Single leader policy, use the raw throughput cap, not adjusted to system size.
 	}
-	waitingTime := 1000000000 * int64(totalReq/config.Config.ThroughputCap) // In nanoseconds
+	waitingTime := 1000000000 * int64(totalMB/config.Config.ThroughputCap) // In nanoseconds
 	atomic.StoreInt64(&bg.nextBatchTimestamp, time.Now().UnixNano()+waitingTime)
 
 	logger.Debug().
 		Int("nBuckets", len(bg.buckets)).
-		Int("nReq", len(newBatch.Requests)).
-		Int("left", bg.CountRequests()).
+		Int("nReq", len(newBatch.MBHashList)).
+		Int("left", bg.CountStableMicroBlock()).
 		Int64("next", waitingTime/1000000). // In milliseconds
 		Msg("Batch cut.")
-
+	
 	return &newBatch
 }
 
 // Blocks until the buckets in the BucketGroup (cumulatively) contain numRequests requests or until timeout elapses.
-// When WaitForRequests returns, bg.totalRequests accurately represents the total number of requests in the BucketGroup.
+// When WaitForRequests returns, bg.totalStableMicroBlock accurately represents the total number of requests in the BucketGroup.
 func (bg *BucketGroup) WaitForRequests(numRequests int, timeout time.Duration) {
 	alreadyWaited := bg.waitMinimum()
 	bg.lockBuckets()
-	bg.waitForRequestsLocked(numRequests, timeout-time.Duration(alreadyWaited)*time.Nanosecond)
+	bg.waitForStableMicroBlockLocked(numRequests, timeout-time.Duration(alreadyWaited)*time.Nanosecond)
 	bg.unlockBuckets()
 }
 
 // Blocks until the buckets in the BucketGroup (cumulatively) contain numRequests requests or until timeout elapses.
-// When WaitForRequests returns, bg.totalRequests accurately represents the total number of requests in the BucketGroup.
+// When WaitForRequests returns, bg.totalStableMicroBlock accurately represents the total number of requests in the BucketGroup.
 // ATTENTION: All Buckets must be LOCKED when calling this method.
-//            May release and re-acquire the bucket locks before returning.
+//
+//	May release and re-acquire the bucket locks before returning.
+//
 // 先等待timeout的时间，然后触发通知CutBatch
-func (bg *BucketGroup) waitForRequestsLocked(numRequests int, timeout time.Duration) {
+func (bg *BucketGroup) waitForStableMicroBlockLocked(numMicroblock int, timeout time.Duration) {
 
 	// Count all requests in all buckets in the group.
 	// (A normal assignment suffices, as all buckets are locked.)
-	bg.totalRequests = int32(bg.CountRequests())
+	bg.totalStableMicroBlock = int32(bg.CountStableMicroBlock())
 
 	// If there are enough requests in the bucket, return immediately.
-	if int(bg.totalRequests) >= numRequests || (timeout == 0) {
+	if int(bg.totalStableMicroBlock) >= numMicroblock || (timeout == 0) {
 		return
 	}
 
 	// Initialize data structures for waiting for requests.
-	bg.cutThreshold = numRequests
+	bg.cutThreshold = numMicroblock
 	bg.timer = time.AfterFunc(timeout, func() { bg.batchTrigger <- struct{}{} })
 
 	// Register this group with all buckets (for notifications).
@@ -229,12 +236,12 @@ func (bg *BucketGroup) waitMinimum() int64 {
 func (bg *BucketGroup) RequestAdded() {
 
 	// Atomically increment and fetch the number of requests in the BucketGroup.
-	totalRequests := atomic.AddInt32(&bg.totalRequests, 1)
+	totalStableMicroBlock := atomic.AddInt32(&bg.totalStableMicroBlock, 1)
 
 	// If CutBatch() is waiting and the required threshold of requests has been reached
 	// It is important to use == (and not >= ) when comparing the request count, s.t. the body of the condition
 	// is only executed once.
-	if bg.timer != nil && int(totalRequests) == bg.cutThreshold {
+	if bg.timer != nil && int(totalStableMicroBlock) == bg.cutThreshold {
 
 		// Stop the timer
 		if bg.timer.Stop() {
@@ -247,14 +254,13 @@ func (bg *BucketGroup) RequestAdded() {
 	}
 }
 
-
-// Counts all requests in all buckets.
+// Counts all StableMicroBlocks in all buckets.
 // Only makes sense if the buckets are locked.
 // 数组的Req数量
-func (bg *BucketGroup) CountRequests() int {
+func (bg *BucketGroup) CountStableMicroBlock() int {
 	n := 0
 	for _, b := range bg.buckets {
-		n += b.Len()
+		n += b.Mempool.stableMicroblocks.Len()
 	}
 	return n
 }

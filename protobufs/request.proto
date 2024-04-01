@@ -2,7 +2,10 @@ syntax = "proto3";
 
 option go_package = "./;protobufs";
 
+import "google/protobuf/timestamp.proto";
+
 package protobufs;
+
 
 message ClientRequest {
     RequestID request_id = 1;
@@ -22,7 +25,19 @@ message RequestID {
 }
 
 message Batch {
-    repeated ClientRequest requests = 1;
+    int32 sn = 1;
+    repeated bytes mb_hash_list = 2;
+    map<string, MBSig> sig_map = 3;
+    int32 bucket_id = 4;
+}
+
+message FilledBatch {
+    repeated ClientRequest Requests = 1;
+}
+
+
+message MBSig {
+    map<int32, bytes> microblock_sigmap = 1;
 }
 
 message MissingEntryRequest {
@@ -32,7 +47,7 @@ message MissingEntryRequest {
 
 message MissingEntry {
     int32 sn = 1;
-    Batch batch = 2;
+    FilledBatch batch = 2;
     bytes digest = 3;
     bool aborted = 4;
     int32 suspect = 5;
@@ -50,4 +65,53 @@ message BucketAssignment {
 
 message ListOfInt32 {
     repeated int32 vals = 1;
+}
+
+// MB部分
+
+message Identifier {
+    bytes value = 1;
+}
+
+message NodeID {
+    int32 value = 1;
+}
+
+message Signature {
+    bytes value = 1;
+}
+
+message Request {
+    ClientRequest msg = 1;
+    bytes digest = 2;
+    bool verified = 3;
+    bool in_flight = 4;
+}
+
+message MissingMBRequest {
+    int32 requester_id = 1;
+    int32    bucket_id = 2;
+    int32 sn = 3;
+    repeated Identifier missing_mb_list = 4;
+}
+
+message MicroBlock {
+    int32 sn = 1;
+    Identifier hash = 2;
+    repeated Request txns = 3;
+    google.protobuf.Timestamp timestamp = 4;
+    google.protobuf.Timestamp future_timestamp = 5;
+    int32 sender = 6;
+    bool is_requested = 7;
+    bool is_forward = 8;
+    bytes bitmap = 9;
+    int32 hops = 10;
+    int32 bucket_id = 11;
+}
+
+message Ack {
+    int32 receiver = 1;
+    Identifier microblock_id = 2;
+    Signature signature = 3;
+    int32    bucket_id = 4;
 }

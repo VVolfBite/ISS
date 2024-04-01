@@ -218,11 +218,11 @@ func (ri *raftInstance) heartbeat() {
 				msg.Sn = sn
 
 				// Cut immediately a batch
-				batch := ri.segment.Buckets().CutBatch(config.Config.BatchSize, 0)
+				batch := ri.segment.Buckets().CutBatch(config.Config.BatchSize, 0, sn)
 				logger.Info().
 					Int32("sn", sn).
 					Int("segment", ri.segment.SegID()).
-					Int("requests", len(batch.Requests)).
+					Int("MBs", len(batch.MBHashList)).
 					Msg("Cutting new batch")
 				if config.Config.SignRequests {
 					// TODO: Do something useful with the result of signature verification
@@ -230,7 +230,7 @@ func (ri *raftInstance) heartbeat() {
 						logger.Fatal().Msg("Signature verification of freshly cat Batch failed.")
 					}
 				}
-				batch.MarkInFlight()
+				// batch.MarkInFlight()
 				request.Batch = batch.Message()
 
 				// Increase next sequence number index
@@ -506,7 +506,7 @@ func (ri *raftInstance) SendAppendEntryRequest(req *pb.RaftAppendEntryRequest, s
 			Int32("last", ri.last).
 			Msg("Updated leader state")
 
-		tracing.MainTrace.Event(tracing.PROPOSE, int64(sn), int64(len(req.Batch.Requests)))
+		tracing.MainTrace.Event(tracing.PROPOSE, int64(sn), int64(len(req.Batch.MbHashList)))
 	}
 
 	// Enqueue new log entry and potentially uncommitted entries to each follower
@@ -798,8 +798,8 @@ func (ri *raftInstance) handleMissingEntry(msg *pb.MissingEntry) {
 	}
 
 	// Add the new batch
-	batch := request.NewBatch(msg.Batch)
-	batch.MarkInFlight()
+	batch := request.NewFilledBatch(msg.Batch)
+	// batch.MarkInFlight()
 
 	// And announce it
 	request.RemoveBatch(batch)
@@ -847,9 +847,17 @@ func (ri *raftInstance) maybeAnnounce() {
 		Msg("Announcement.")
 
 	// Remove batch requests
-	request.RemoveBatch(ri.log[index].batch)
-	announcer.Announce(&log.Entry{Sn: ri.log[index].sn, Batch: ri.log[index].batch.Message()})
-
+	go func() {
+		for {
+			filledBatch := ri.log[index].batch.FillBatch(int(ri.log[index].sn)).Message()
+			if filledBatch != nil {
+				request.RemoveBatch(request.NewFilledBatch(filledBatch))
+				announcer.Announce(&log.Entry{Sn: ri.log[index].sn, Batch: filledBatch})
+				break // 如果成功调用了 announce，则退出循环
+			}
+			time.Sleep(time.Second) // 每次重试之间等待一段时间，避免过于频繁的重试
+		}
+	}()
 	ri.maybeAnnounce()
 }
 

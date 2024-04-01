@@ -21,7 +21,6 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
-	logger "github.com/rs/zerolog/log"
 	"github.com/hyperledger-labs/mirbft/announcer"
 	"github.com/hyperledger-labs/mirbft/config"
 	"github.com/hyperledger-labs/mirbft/crypto"
@@ -33,6 +32,8 @@ import (
 	"github.com/hyperledger-labs/mirbft/request"
 	"github.com/hyperledger-labs/mirbft/statetransfer"
 	"github.com/hyperledger-labs/mirbft/tracing"
+	"github.com/hyperledger-labs/mirbft/util"
+	logger "github.com/rs/zerolog/log"
 )
 
 const (
@@ -265,7 +266,7 @@ func (pi *pbftInstance) proposeSN(preprepare *pb.PbftPreprepare, sn int32) {
 	}
 
 	// Create the actual request batch. The timeout is 0, since the we already waited for the batch in pi.lead().
-	batch := pi.segment.Buckets().CutBatch(batchSize, 0)
+	batch := pi.segment.Buckets().CutBatch(batchSize, 0 , sn)
 
 	// Notify batch cutting goroutine that it can start waiting for the next batch.
 	pi.cutBatch <- struct{}{}
@@ -276,7 +277,7 @@ func (pi *pbftInstance) proposeSN(preprepare *pb.PbftPreprepare, sn int32) {
 			logger.Error().Msg("Signature verification of request in freshly cut batch failed.")
 		}
 	}
-	batch.MarkInFlight()
+	// batch.MarkInFlight()
 	preprepare.Batch = batch.Message()
 
 	// This is technically not necessary, as new batches are only proposed in view 0
@@ -285,7 +286,7 @@ func (pi *pbftInstance) proposeSN(preprepare *pb.PbftPreprepare, sn int32) {
 	logger.Info().Int32("sn", sn).
 		Int32("view", pi.view).
 		Int32("senderID", membership.OwnID).
-		Int("nReq", len(preprepare.Batch.Requests)).
+		Int("nMBHash", len(preprepare.Batch.MbHashList)).
 		Msg("Sending PREPREPARE.")
 
 	// Add message to own log
@@ -308,7 +309,7 @@ func (pi *pbftInstance) proposeSN(preprepare *pb.PbftPreprepare, sn int32) {
 		},
 	}
 
-	tracing.MainTrace.Event(tracing.PROPOSE, int64(sn), int64(len(batch.Requests)))
+	tracing.MainTrace.Event(tracing.PROPOSE, int64(sn), int64(len(batch.MBHashList)))
 
 	// Enqueue the message for all followers
 	for _, nodeID := range pi.segment.Followers() {
@@ -325,7 +326,7 @@ func (pi *pbftInstance) handlePreprepare(preprepare *pb.PbftPreprepare, msg *pb.
 
 	logger.Info().Int32("sn", sn).
 		Int32("senderID", senderID).
-		Int("nReq", len(preprepare.Batch.Requests)).
+		Int("nMBHash", len(preprepare.Batch.MbHashList)).
 		Msg("Handling PREPREPARE.")
 
 	if sn != preprepare.Sn {
@@ -375,15 +376,15 @@ func (pi *pbftInstance) handlePreprepare(preprepare *pb.PbftPreprepare, msg *pb.
 		return fmt.Errorf("proposal from %d contains invalid requests", senderID)
 	}
 	// Check that proposal does not contain preprepared ("in flight") requests.
-	if err := batch.batch.CheckInFlight(); err != nil {
-		return fmt.Errorf("proposal from %d contains in flight requests: %s", senderID, err.Error())
-	}
+	// if err := batch.batch.CheckInFlight(); err != nil {
+	// 	return fmt.Errorf("proposal from %d contains in flight requests: %s", senderID, err.Error())
+	// }
 	// Check that proposal does not contain requests that do not match the current active bucket
 	if err := batch.batch.CheckBucket(pi.segment.Buckets().GetBucketIDs()); err != nil {
 		return fmt.Errorf("proposal from %d contains in requests from invalid bucket: %s", senderID, err.Error())
 	}
 	// Mark requests as preprepared
-	batch.batch.MarkInFlight()
+	// batch.batch.MarkInFlight()
 
 	// Create new batch
 	digest := pbftDigest(preprepare)
@@ -407,8 +408,16 @@ func (pi *pbftInstance) handlePreprepare(preprepare *pb.PbftPreprepare, msg *pb.
 		//	logger.Warn().Int32("sn", sn).Int("segID", pi.segment.SegID()).Int32("ownID", membership.OwnID).Msg("DEBUG: not committing!")
 		//	return nil
 		//}
-
-		pi.announce(batch, sn, preprepare.Batch, preprepare.Aborted, preprepare.Ts, batch.lastCommitTs)
+		go func() {
+			for {
+				filledBatch := batch.batch.FillBatch(batch.batch.Sn)
+				if filledBatch != nil {
+					pi.announce(batch, sn, filledBatch.Message(), preprepare.Aborted, preprepare.Ts, batch.lastCommitTs)
+					break // 如果成功调用了 announce，则退出循环
+				}
+				time.Sleep(time.Second) // 每次重试之间等待一段时间，避免过于频繁的重试
+			}
+		}()
 	}
 
 	return nil
@@ -499,8 +508,16 @@ func (pi *pbftInstance) handlePrepare(prepare *pb.PbftPrepare, msg *pb.ProtocolM
 		//	logger.Warn().Int32("sn", sn).Int("segID", pi.segment.SegID()).Int32("ownID", membership.OwnID).Msg("DEBUG: not committing!")
 		//	return nil
 		//}
-
-		pi.announce(batch, sn, batch.preprepareMsg.Batch, batch.preprepareMsg.Aborted, batch.preprepareMsg.Ts, batch.lastCommitTs)
+		go func() {
+			for {
+				filledBatch := request.NewBatch(batch.preprepareMsg.Batch).FillBatch(int(sn)).Message()
+				if filledBatch != nil {
+					pi.announce(batch, sn, filledBatch, batch.preprepareMsg.Aborted, batch.preprepareMsg.Ts, batch.lastCommitTs)
+					break // 如果成功调用了 announce，则退出循环
+				}
+				time.Sleep(time.Second) // 每次重试之间等待一段时间，避免过于频繁的重试
+			}
+		}()
 	}
 
 	return nil
@@ -591,8 +608,16 @@ func (pi *pbftInstance) handleCommit(commit *pb.PbftCommit, msg *pb.ProtocolMess
 		//	logger.Warn().Int32("sn", sn).Int("segID", pi.segment.SegID()).Int32("ownID", membership.OwnID).Msg("DEBUG: not committing!")
 		//	return nil
 		//}
-
-		pi.announce(batch, sn, batch.preprepareMsg.Batch, batch.preprepareMsg.Aborted, batch.preprepareMsg.Ts, batch.lastCommitTs)
+		go func() {
+			for {
+				filledBatch := request.NewBatch(batch.preprepareMsg.Batch).FillBatch(int(sn)).Message()
+				if filledBatch != nil {
+					pi.announce(batch, sn, filledBatch, batch.preprepareMsg.Aborted, batch.preprepareMsg.Ts, batch.lastCommitTs)
+					break // 如果成功调用了 announce，则退出循环
+				}
+				time.Sleep(time.Second) // 每次重试之间等待一段时间，避免过于频繁的重试
+			}
+		}()
 	}
 
 	return nil
@@ -613,11 +638,11 @@ func (pi *pbftInstance) handleMissingEntry(msg *pb.MissingEntry) {
 		//       Make sure that this is done appropriately whether the entry was fetched based on a high-level
 		//       checkpoin or a segment-level checkpoint.
 
-		if batch.batch != nil {
-			batch.batch.Resurrect()
-		}
-		batch.batch = request.NewBatch(msg.Batch)
-		batch.batch.MarkInFlight()
+		// if batch.batch != nil {
+		// 	batch.batch.Resurrect()
+		// }
+		// batch.batch = request.NewFilledBatch(msg.Batch)
+		// batch.batch.MarkInFlight()
 		batch.digest = msg.Digest
 		// We must not touch the preprepared or prepared flag to prevent potential segfaults,
 		// as the prepare messages and the preprepare message might still be absent.
@@ -626,7 +651,7 @@ func (pi *pbftInstance) handleMissingEntry(msg *pb.MissingEntry) {
 	}
 }
 
-func (pi *pbftInstance) announce(batch *pbftBatch, sn int32, reqBatch *pb.Batch, aborted bool, proposeTs int64, commitTs int64) {
+func (pi *pbftInstance) announce(batch *pbftBatch, sn int32, reqBatch *pb.FilledBatch, aborted bool, proposeTs int64, commitTs int64) {
 	if batch.viewChangeTimer != nil {
 		notFired := batch.viewChangeTimer.Stop()
 		if !notFired {
@@ -639,7 +664,7 @@ func (pi *pbftInstance) announce(batch *pbftBatch, sn int32, reqBatch *pb.Batch,
 	batch.committed = true
 
 	// Remove batch requests
-	request.RemoveBatch(batch.batch)
+	request.RemoveBatch(request.NewFilledBatch(reqBatch))
 
 	logEntry := &log.Entry{
 		Sn:        sn,
@@ -1062,7 +1087,9 @@ func (pi *pbftInstance) maybeSendNewView(view int32) {
 						View:   view,
 						Leader: membership.OwnID,
 						Batch: &pb.Batch{
-							Requests: make([]*pb.ClientRequest, 0, 0),
+							MbHashList: make([][]byte, 0),
+							SigMap: make(map[string]*pb.MBSig),
+							BucketId: -1,
 						},
 						Aborted: true,
 
@@ -1075,7 +1102,7 @@ func (pi *pbftInstance) maybeSendNewView(view int32) {
 					}
 					vci.reproposeBatches[sn] = &pbftBatch{
 						preprepareMsg: emptyPreprepare,
-						batch:         &request.Batch{Requests: make([]*request.Request, 0, 0)},
+						batch:         &request.Batch{MBHashList: make([][]byte, 0, 0) , SigMap: make(map[util.Identifier]map[int32][]byte)},
 						digest:        pbftDigest(emptyPreprepare),
 						committed:     false,
 					}
@@ -1418,9 +1445,9 @@ func (pi *pbftInstance) sendNewView() {
 		batch.digest = repropose.digest
 
 		// Committed batches are already marked as in flight. (This check is redundant, as MarkInFlight is idempotent.)
-		if !batch.committed {
-			batch.batch.MarkInFlight()
-		}
+		// if !batch.committed {
+		// 	batch.batch.MarkInFlight()
+		// }
 	}
 
 	// Enable protocol message handling for the new view
@@ -1543,7 +1570,7 @@ func (pi *pbftInstance) handleNewView(signed *pb.SignedMsg, senderID int32) erro
 				if notInP >= 2*membership.Faults()+1 {
 					// Check if there calculated xset value matches the one in the newview message
 					if preprepare := newview.Xset[sn]; preprepare != nil && preprepare.Batch != nil {
-						if len(preprepare.Batch.Requests) > 0 {
+						if len(preprepare.Batch.MbHashList) > 0 {
 							pi.sendViewChange()
 							return fmt.Errorf("invalid xset: preprepare for sn %d should have empty batch", sn)
 						}
@@ -1667,7 +1694,7 @@ func (pi *pbftInstance) handleNewView(signed *pb.SignedMsg, senderID int32) erro
 		if !batch.committed {
 			batch.digest = pbftDigest(preprepare)
 			batch.batch = request.NewBatch(preprepare.Batch)
-			batch.batch.MarkInFlight()
+			// batch.batch.MarkInFlight()
 		}
 
 		if !isLeading(pi.segment, membership.OwnID, pi.view) {

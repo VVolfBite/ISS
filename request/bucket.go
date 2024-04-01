@@ -327,19 +327,23 @@ func (b *Bucket) PrependMultiple(reqs []*Request) {
 // Removes the first up to n Requests from the Bucket and appends them to dest.
 // Returns the resulting slice obtained by appending the Requests to dest.
 // ATTENTION: Bucket must be LOCKED when calling this method.
-func (b *Bucket) RemoveFirst(n int, dest []*Request) []*Request {
-
-	// While there are still Requests in the bucket and the limit has not been reached.
-	for ; b.numRequests > 0 && n > 0; n-- {
-
-		if b.FirstRequest == nil {
-			logger.Error().Int("numRequests", b.numRequests).Int("bktId", b.id).Msg("FirstRequest nil!")
-		}
-		// Move the first request from the bucket into the destination slice.
-		dest = append(dest, b.FirstRequest)
-		b.removeNoLock(b.FirstRequest)
+// 改写为 根据要移除的MB数量n追加到dest中，并删除Mb中的Req
+func (b *Bucket) GetBatchAndRemoveReq(n int, dest Batch) Batch {
+	b.Mempool.mu.Lock()
+	defer b.Mempool.mu.Unlock()
+	payload := b.Mempool.GeneratePayloadWithSize(n)
+	dest.MBHashList = append(dest.MBHashList, payload.GenerateHashList()...)
+	for k, v := range payload.SigMap {
+		// 将 kmap 中的键值对添加到 dest.SigMap 中
+		dest.SigMap[k] = v
 	}
-
+	// While there are still Requests in the bucket and the limit has not been reached.
+	dest.BucketId = b.id
+	for _, mb := range payload.MicroblockList {
+		for _, req := range mb.Txns {
+			b.removeNoLock(req)
+		}
+	}
 	return dest
 }
 

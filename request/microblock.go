@@ -17,7 +17,7 @@ type PendingMicroblock struct {
 	AckMap     map[int32]struct{} // who has sent acks
 }
 type MicroBlock struct {
-	ProposalID      util.Identifier
+	Sn      int
 	BucketID        int
 	Hash            util.Identifier
 	Txns            []*Request
@@ -37,24 +37,28 @@ type Ack struct {
 }
 type PendingBlock struct {
 	Payload    *Payload // microblocks that already exist
-	Proposal   *Proposal
+	MBHashList [][]byte
 	MissingMap map[util.Identifier]struct{} // missing list
 }
 type Payload struct {
 	MicroblockList []*MicroBlock
-	SigMap         map[util.Identifier]map[int32]util.Signature
-}
-type Proposal struct {
-	HashList []util.Identifier
+	SigMap         map[util.Identifier]map[int32][]byte
 }
 type MissingMBRequest struct {
 	RequesterID   int32
 	BucketID      int32
-	ProposalID    util.Identifier
+	Sn    int
 	MissingMBList []util.Identifier
 }
 type Block struct {
 	Payload *Payload
+}
+
+func (pd *PendingBlock) CompleteBlock() *Block {
+	if len(pd.MissingMap) == 0 {
+		return BuildBlock(pd.MBHashList, pd.Payload)
+	}
+	return nil
 }
 
 func (mb *MicroBlock) hash() util.Identifier {
@@ -81,29 +85,40 @@ func (ack *Ack) AckDigest() []byte {
 	// membership.OwnPrivKey
 }
 
-func NewMicroblock(proposalID util.Identifier, txnList []*Request) *MicroBlock {
+func NewMicroblock(Sn int, txnList []*Request) *MicroBlock {
 	mb := new(MicroBlock)
-	mb.ProposalID = proposalID
+	mb.Sn = Sn
 	mb.Txns = txnList
 	mb.Timestamp = time.Now()
 	mb.Hash = mb.hash()
 	return mb
 }
 
-func NewPendingBlock(proposal *Proposal, missingMap map[util.Identifier]struct{}, microBlocks []*MicroBlock) *PendingBlock {
+func NewPendingBlock(MBHashList [][]byte, missingMap map[util.Identifier]struct{}, microBlocks []*MicroBlock) *PendingBlock {
 	return &PendingBlock{
-		Proposal:   proposal,
+		MBHashList: MBHashList,
 		MissingMap: missingMap,
 		Payload:    &Payload{MicroblockList: microBlocks},
 	}
 }
 
-func NewPayload(microblockList []*MicroBlock, sigs map[util.Identifier]map[int32]util.Signature) *Payload {
+func NewPayload(microblockList []*MicroBlock, sigs map[util.Identifier]map[int32][]byte) *Payload {
 	return &Payload{
 		MicroblockList: microblockList,
 		SigMap:         sigs,
 	}
 }
+func (pl *Payload) GenerateHashList() [][]byte {
+	hashList := make([][]byte, 0)
+	for _, mb := range pl.MicroblockList {
+		if mb == nil {
+			continue
+		}
+		hashList = append(hashList, mb.Hash[:])
+	}
+	return hashList
+}
+
 
 func (pd *PendingBlock) AddMicroblock(mb *MicroBlock) *Block {
 	_, exists := pd.MissingMap[mb.Hash]
@@ -112,12 +127,12 @@ func (pd *PendingBlock) AddMicroblock(mb *MicroBlock) *Block {
 		delete(pd.MissingMap, mb.Hash)
 	}
 	if len(pd.MissingMap) == 0 {
-		return BuildBlock(pd.Proposal, pd.Payload)
+		return BuildBlock(pd.MBHashList, pd.Payload)
 	}
 	return nil
 }
 
-func BuildBlock(proposal *Proposal, payload *Payload) *Block {
+func BuildBlock(MBHashList [][]byte, payload *Payload) *Block {
 	return &Block{
 		Payload: payload,
 	}
@@ -134,8 +149,8 @@ func FromProtoMissingMBRequest(protoReq *pb.MissingMBRequest) *MissingMBRequest 
 	}
 
 	return &MissingMBRequest{
-		RequesterID:   int32(FromProtoNodeID(protoReq.RequesterId)),
-		ProposalID:    util.Identifier(FromProtoIdentifier(protoReq.ProposalId)),
+		RequesterID:   protoReq.RequesterId,
+		Sn:    int(protoReq.Sn),
 		MissingMBList: missingMBList,
 		BucketID:      protoReq.BucketId,
 	}
@@ -148,8 +163,8 @@ func ToProtoMissingMBRequest(req *MissingMBRequest) *pb.MissingMBRequest {
 	}
 
 	return &pb.MissingMBRequest{
-		RequesterId:   ToProtoNodeID(req.RequesterID),
-		ProposalId:    ToProtoIdentifier(req.ProposalID),
+		RequesterId:   req.RequesterID,
+		Sn:    int32(req.Sn),
 		MissingMbList: protoMissingMBList,
 		BucketId:      req.BucketID,
 	}
@@ -188,7 +203,7 @@ func ToProtoMicroBlock(mb *MicroBlock) *pb.MicroBlock {
 	}
 
 	return &pb.MicroBlock{
-		ProposalId:      &pb.Identifier{Value: mb.ProposalID[:]},
+		Sn:      		int32(mb.Sn),
 		Hash:            &pb.Identifier{Value: mb.Hash[:]},
 		Txns:            txns,
 		Timestamp:       TimeToProtoTimestamp(mb.Timestamp),
@@ -211,7 +226,7 @@ func FromProtoMicroBlock(protoMb *pb.MicroBlock) *MicroBlock {
 	}
 
 	return &MicroBlock{
-		ProposalID:      util.BytesToIdentifier(protoMb.ProposalId.Value),
+		Sn:      		int(protoMb.Sn),
 		Hash:            util.BytesToIdentifier(protoMb.Hash.Value),
 		Txns:            txns,
 		Timestamp:       ProtoTimestampToTime(protoMb.Timestamp),

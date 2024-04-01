@@ -345,7 +345,7 @@ func checkForHotStuffProposal(msg *pb.ProtocolMessage, logOutput string) {
 			Int32("sn", msg.Sn).
 			Int32("height", n.Height).
 			Int32("view", n.View).
-			Int("nReq", len(n.Batch.Requests)).
+			Int("nMBHash", len(n.Batch.MbHashList)).
 			Msg(logOutput)
 	}
 }

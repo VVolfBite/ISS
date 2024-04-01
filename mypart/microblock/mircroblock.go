@@ -39,12 +39,12 @@ type PendingBlock struct {
 type Ack struct {
 	Receiver     util.NodeID
 	MicroblockID util.Identifier
-	util.Signature
+	Signature    []byte
 }
 
 type Payload struct {
 	MicroblockList []*MicroBlock
-	SigMap         map[util.Identifier]map[util.NodeID]util.Signature
+	SigMap         map[util.Identifier]map[util.NodeID][]byte
 }
 
 type Proposal struct {
@@ -89,7 +89,7 @@ func NewPendingBlock(proposal *Proposal, missingMap map[util.Identifier]struct{}
 	}
 }
 
-func NewPayload(microblockList []*MicroBlock, sigs map[util.Identifier]map[util.NodeID]util.Signature) *Payload {
+func NewPayload(microblockList []*MicroBlock, sigs map[util.Identifier]map[util.NodeID][]byte) *Payload {
 	return &Payload{
 		MicroblockList: microblockList,
 		SigMap:         sigs,

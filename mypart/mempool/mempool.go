@@ -5,7 +5,7 @@ import (
 	"github.com/hyperledger-labs/mirbft/mypart/microblock"
 	"github.com/hyperledger-labs/mirbft/request"
 	"github.com/hyperledger-labs/mirbft/util"
-	logger "github.com/rs/zerolog/log"
+	// logger "github.com/rs/zerolog/log"
 	"sync"
 )
 
@@ -14,7 +14,7 @@ type MemPool struct {
 	txnList            *list.List
 	microblockMap      map[util.Identifier]*microblock.MicroBlock         // 所有存储下来的mb
 	pendingMicroblocks map[util.Identifier]*microblock.PendingMicroblock  // pending 是指还没有收集到足够的ack  处于等待不能用于共识的mb
-	ackBuffer          map[util.Identifier]map[util.NodeID]util.Signature // ack buffer 记录了mb收集到了那些节点的ack签名
+	ackBuffer          map[util.Identifier]map[util.NodeID][]byte // ack buffer 记录了mb收集到了那些节点的ack签名
 	stableMBs          map[util.Identifier]struct{}                       //stable 是指收集到了足够ack的可以用于共识了的 mb
 	bsize              int                                                // number of microblocks in a proposal
 	msize              int                                                // byte size of transactions in a microblock
@@ -40,7 +40,7 @@ func NewMemPool() *MemPool {
 		stableMicroblocks:  list.New(),
 		microblockMap:      make(map[util.Identifier]*microblock.MicroBlock),
 		pendingMicroblocks: make(map[util.Identifier]*microblock.PendingMicroblock),
-		ackBuffer:          make(map[util.Identifier]map[util.NodeID]util.Signature),
+		ackBuffer:          make(map[util.Identifier]map[util.NodeID][]byte),
 		stableMBs:          make(map[util.Identifier]struct{}),
 		currSize:           0,
 		txnList:            list.New(),
@@ -160,7 +160,7 @@ func (am *MemPool) AddAck(ack *microblock.Ack) {
 		if exist {
 			am.ackBuffer[ack.MicroblockID][ack.Receiver] = ack.Signature
 		} else {
-			temp := make(map[util.NodeID]util.Signature, 0)
+			temp := make(map[util.NodeID][]byte, 0)
 			temp[ack.Receiver] = ack.Signature
 			am.ackBuffer[ack.MicroblockID] = temp
 		}
@@ -169,19 +169,11 @@ func (am *MemPool) AddAck(ack *microblock.Ack) {
 
 // GeneratePayload generates a list of microblocks according to bsize
 // if the remaining microblocks is less than bsize then return all
-func (am *MemPool) GeneratePayload() *microblock.Payload {
-	var batchSize int
+func (am *MemPool) GeneratePayloadWithSize(batchSize int) *microblock.Payload {
 	am.mu.Lock()
 	defer am.mu.Unlock()
-	sigMap := make(map[util.Identifier]map[util.NodeID]util.Signature, 0)
-
-	if am.stableMicroblocks.Len() >= am.bsize {
-		batchSize = am.bsize
-	} else {
-		batchSize = am.stableMicroblocks.Len()
-	}
+	sigMap := make(map[util.Identifier]map[util.NodeID][]byte, 0)
 	microblockList := make([]*microblock.MicroBlock, 0)
-
 	for i := 0; i < batchSize; i++ {
 		mb := am.front()
 		if mb == nil {
@@ -190,7 +182,7 @@ func (am *MemPool) GeneratePayload() *microblock.Payload {
 		//log.Debugf("microblock id: %x is deleted from mempool when proposing", mb.Hash)
 		microblockList = append(microblockList, mb)
 
-		sigs := make(map[util.NodeID]util.Signature, 0)
+		sigs := make(map[util.NodeID][]byte, 0)
 		count := 0
 		for id, sig := range am.ackBuffer[mb.Hash] {
 			count++

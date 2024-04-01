@@ -21,7 +21,6 @@ import (
 	"time"
 
 	"github.com/golang/protobuf/proto"
-	logger "github.com/rs/zerolog/log"
 	"github.com/hyperledger-labs/mirbft/announcer"
 	"github.com/hyperledger-labs/mirbft/config"
 	"github.com/hyperledger-labs/mirbft/log"
@@ -31,6 +30,8 @@ import (
 	pb "github.com/hyperledger-labs/mirbft/protobufs"
 	"github.com/hyperledger-labs/mirbft/request"
 	"github.com/hyperledger-labs/mirbft/tracing"
+	"github.com/hyperledger-labs/mirbft/util"
+	logger "github.com/rs/zerolog/log"
 )
 
 // Implements chained HotStuff for the sequence numbers of the segment.
@@ -119,7 +120,9 @@ func (hi *hotStuffInstance) init(seg manager.Segment, orderer *HotStuffOrderer) 
 		Height: 0,
 		Parent: nil,
 		Batch: &pb.Batch{
-			Requests: make([]*pb.ClientRequest, 0, 0),
+			MbHashList: make([][]byte, 0 ,0),
+			SigMap: make(map[string]*pb.MBSig),
+			BucketId: -1,
 		},
 		Certificate: &pb.HotStuffQC{
 			Height:    0,
@@ -165,7 +168,7 @@ func (hi *hotStuffInstance) start() {
 
 		// Schedule a batch for the first sn in the segment
 		go func() {
-			hi.newBatch <- hi.segment.Buckets().CutBatch(config.Config.BatchSize, config.Config.BatchTimeout)
+			hi.newBatch <- hi.segment.Buckets().CutBatch(config.Config.BatchSize, config.Config.BatchTimeout, -1)
 		}()
 
 		// Send a proposal for the *fist* sn in the segment
@@ -190,13 +193,13 @@ func (hi *hotStuffInstance) proposeSN(sn int32) {
 	if hi.view == 0 && !hi.segmentProposed {
 		// Wait for a new batch
 		batch = <-hi.newBatch
-
+		batch.Sn = int(sn)
 		logger.Info().Int32("sn", sn).
 			Int("segment", hi.segment.SegID()).
 			Int32("height", hi.leaf.height+1).
 			Int32("view", hi.view).
 			Int32("senderID", membership.OwnID).
-			Int("nReq", len(batch.Requests)).
+			Int("nMBHash", len(batch.MBHashList)).
 			Msg("New BATCH.")
 
 		hi.next = hi.next + 1
@@ -208,12 +211,12 @@ func (hi *hotStuffInstance) proposeSN(sn int32) {
 		// If the segment is not proposed yet schedule a new batch
 		if !hi.segmentProposed {
 			go func() {
-				hi.newBatch <- hi.segment.Buckets().CutBatch(config.Config.BatchSize, config.Config.BatchTimeout)
+				hi.newBatch <- hi.segment.Buckets().CutBatch(config.Config.BatchSize, config.Config.BatchTimeout, -1)
 			}()
 		}
 
 	} else {
-		batch = &request.Batch{Requests: make([]*request.Request, 0, 0)}
+		batch = &request.Batch{MBHashList: make([][]byte, 0), SigMap: make(map[util.Identifier]map[int32][]byte)}
 		hi.next = hi.next + 1
 	}
 
@@ -249,7 +252,7 @@ func (hi *hotStuffInstance) proposeSN(sn int32) {
 		Bool("proposed", hi.segmentProposed).
 		Msg("Sending PROPOSAL.")
 
-	tracing.MainTrace.Event(tracing.PROPOSE, int64(sn), int64(len(batch.Requests)))
+	tracing.MainTrace.Event(tracing.PROPOSE, int64(sn), int64(len(batch.MBHashList)))
 
 	// Handle own proposal as follower to make sure state for this node is created before votes are received
 	hi.handleProposal(msg.GetProposal(), msg)
@@ -347,9 +350,9 @@ func (hi *hotStuffInstance) handleProposal(proposal *pb.HotStuffProposal, msg *p
 	}
 
 	// Check that proposal does not contain preprepared ("in flight") requests.
-	if err := batch.CheckInFlight(); err != nil {
-		return fmt.Errorf("proposal %d from %d contains in flight requests: %s", sn, senderID, err.Error())
-	}
+	// if err := batch.CheckInFlight(); err != nil {
+	// 	return fmt.Errorf("proposal %d from %d contains in flight requests: %s", sn, senderID, err.Error())
+	// }
 
 	// Check that proposal does not contain requests that do not match the current active bucket
 	if err := batch.CheckBucket(hi.segment.Buckets().GetBucketIDs()); err != nil {
@@ -359,7 +362,7 @@ func (hi *hotStuffInstance) handleProposal(proposal *pb.HotStuffProposal, msg *p
 	hi.vheight = proposal.Node.Height
 
 	new := hi.newNode(hi.nodes[proposal.Node.Certificate.Height], batch, proposal.Node.Certificate, sn, proposal.Node.Height, senderID)
-	batch.MarkInFlight()
+	// batch.MarkInFlight()
 
 	// Update to own log
 	hi.height2sn[proposal.Node.Height] = sn
@@ -392,7 +395,16 @@ func (hi *hotStuffInstance) handleProposal(proposal *pb.HotStuffProposal, msg *p
 
 	decided := new.parent.parent.parent
 	if !decided.announced {
-		hi.announce(decided, hi.height2sn[decided.height], decided.batch.Message(), decided.digest, decided.node.Aborted)
+		go func() {
+			for {
+				filledBatch := decided.batch.FillBatch(decided.batch.Sn)
+				if filledBatch != nil {
+					hi.announce(decided, hi.height2sn[decided.height], filledBatch.Message(), decided.digest, decided.node.Aborted)
+					break // 如果成功调用了 announce，则退出循环
+				}
+				time.Sleep(time.Second) // 每次重试之间等待一段时间，避免过于频繁的重试
+			}
+		}()
 	}
 
 	// Return to serializer the proposal with the next height to be voted.
@@ -672,18 +684,18 @@ func (hi *hotStuffInstance) handleMissingEntry(msg *pb.MissingEntry) {
 		// If the node is not announced
 		if !node.announced {
 			node.announced = true
-			if node.batch != nil {
-				node.batch.Resurrect()
-			}
-			node.batch = request.NewBatch(msg.Batch)
-			node.batch.MarkInFlight()
+			// if node.batch != nil {
+			// 	node.batch.Resurrect()
+			// }
+			// node.batch = request.NewBatch(msg.Batch)
+			// node.batch.MarkInFlight()
 			node.digest = msg.Digest
 			hi.announce(node, msg.Sn, msg.Batch, msg.Digest, msg.Aborted)
 		}
 	}
 }
 
-func (hi *hotStuffInstance) announce(node *hotStuffNode, sn int32, reqBatch *pb.Batch, digest []byte, aborted bool) {
+func (hi *hotStuffInstance) announce(node *hotStuffNode, sn int32, reqBatch *pb.FilledBatch, digest []byte, aborted bool) {
 	if node != nil {
 		// Cancel timer
 		if node.viewChangeTimer != nil {
@@ -708,7 +720,7 @@ func (hi *hotStuffInstance) announce(node *hotStuffNode, sn int32, reqBatch *pb.
 		node.announced = true
 
 		// Remove batch requests
-		request.RemoveBatch(node.batch)
+		request.RemoveBatch(request.NewFilledBatch(reqBatch))
 	}
 
 	logger.Info().

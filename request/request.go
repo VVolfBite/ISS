@@ -59,10 +59,11 @@ var (
 	batchVerifierFunc func(*Batch) bool
 
 	MissingCounts   map[int32]int
-	MissingMBs      map[util.Identifier]util.Identifier          // 缺失的mb，即所有 pending block的快速映射
+	MissingMBs      map[util.Identifier]int        // 缺失的mb，即所有 pending block的快速映射
 	ReceivedMBs     map[util.Identifier]struct{}                 // 收到的mb
 	RMBmu			sync.Mutex									// 保护线程安全所需要的锁
-	PendingBlockMap map[util.Identifier]*PendingBlock // pending block 是对fill proposal后仍有mb没有获取需要retrive的的block的称呼
+	PendingBlockMap map[int]*PendingBlock // pending block 是对fill proposal后仍有mb没有获取需要retrive的的block的称呼
+	
 )
 
 type watermarkRange struct {
@@ -76,9 +77,9 @@ type watermarkRange struct {
 func Init() {
 
 	MissingCounts = make(map[int32]int)
-	MissingMBs = make(map[util.Identifier]util.Identifier)
+	MissingMBs = make(map[util.Identifier]int)
 	ReceivedMBs = make(map[util.Identifier]struct{})
-	PendingBlockMap =make(map[util.Identifier]*PendingBlock)
+	PendingBlockMap =make(map[int]*PendingBlock)
 
 	// Initializes the Buckets.
 	Buckets = make([]*Bucket, config.Config.NumBuckets)
@@ -247,7 +248,7 @@ func Add(req *Request) *Request {
 // Removes all requests in batch from their respective Buckets.
 // The buffer is not affected by this function.
 // 将一个batch中的所有Req从Buckets中移除
-func RemoveBatch(batch *Batch) {
+func RemoveBatch(batch *FilledBatch) {
 
 	// Do nothing if batch is empty.
 	if len(batch.Requests) == 0 {

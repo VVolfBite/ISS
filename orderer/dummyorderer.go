@@ -18,7 +18,6 @@ import (
 	"fmt"
 	"sync"
 
-	logger "github.com/rs/zerolog/log"
 	"github.com/hyperledger-labs/mirbft/announcer"
 	"github.com/hyperledger-labs/mirbft/config"
 	"github.com/hyperledger-labs/mirbft/log"
@@ -28,7 +27,9 @@ import (
 	pb "github.com/hyperledger-labs/mirbft/protobufs"
 	"github.com/hyperledger-labs/mirbft/request"
 	"github.com/hyperledger-labs/mirbft/tracing"
+	"github.com/hyperledger-labs/mirbft/util"
 	"github.com/hyperledger-labs/mirbft/validator"
+	logger "github.com/rs/zerolog/log"
 )
 
 // Represents a dummy Orderer implementation (a stub).
@@ -68,32 +69,39 @@ func (do *DummyOrderer) HandleMessage(msg *pb.ProtocolMessage) {
 
 		// Process requests in the received message
 		// 从收到的协议信息直接解析出Req并装成Batch 
-		batch := &request.Batch{Requests: make([]*request.Request, len(dummyMsg.Batch.Requests), len(dummyMsg.Batch.Requests))}
-		for i, reqMsg := range dummyMsg.Batch.Requests {
-			// 这里本应该是检查是否有空Req，即共识失败了
-			if req := request.AddReqMsg(reqMsg); req == nil {
-				logger.Warn().
-					Int32("sn", dummyMsg.Sn).
-					Int32("clId", reqMsg.RequestId.ClientId).
-					Int32("clSn", reqMsg.RequestId.ClientSn).
-					Msg("Failed to add / locate request received from leader.")
+		batch := &request.Batch{MBHashList: make([][]byte, len(dummyMsg.Batch.MbHashList), len(dummyMsg.Batch.MbHashList)), 
+								SigMap: make(map[util.Identifier]map[int32][]byte, len(dummyMsg.Batch.MbHashList)),
 
-				// WARNING: We are abusing the request package here!
-				// (But since we're in the dummy orderer, everything is allowed.)
-				// Normally this would mean that we are very behind (and we should fetch state)
-				// or the leader is faulty. We should ignore the request and the whole batch.
-				// Here, however, we circumvent the request package and create our own dummy Request struct
-				// only for the purpose of delivering it.
-				batch.Requests[i] = request.UglyUglyDummyRegisterRequest(reqMsg)
-			} else {
-				batch.Requests[i] = req
-			}
 		}
+		for i, MBHash:= range dummyMsg.Batch.MbHashList {
+			// 这里本应该是检查是否有空Req，即共识失败了
+			// if req := request.AddReqMsg(reqMsg); req == nil {
+			// 	logger.Warn().
+			// 		Int32("sn", dummyMsg.Sn).
+			// 		Int32("clId", reqMsg.RequestId.ClientId).
+			// 		Int32("clSn", reqMsg.RequestId.ClientSn).
+			// 		Msg("Failed to add / locate request received from leader.")
+
+			// 	// WARNING: We are abusing the request package here!
+			// 	// (But since we're in the dummy orderer, everything is allowed.)
+			// 	// Normally this would mean that we are very behind (and we should fetch state)
+			// 	// or the leader is faulty. We should ignore the request and the whole batch.
+			// 	// Here, however, we circumvent the request package and create our own dummy Request struct
+			// 	// only for the purpose of delivering it.
+			// 	batch.Requests[i] = request.UglyUglyDummyRegisterRequest(reqMsg)
+			// } else {
+			// 	batch.Requests[i] = req
+			// }
+			batch.MBHashList[i] =MBHash
+		}
+
+		filledBatch := &request.FilledBatch{}
+		filledBatchMsg := &pb.FilledBatch{}
 		// 从桶拿出Req，表示共识结束
-		request.RemoveBatch(batch)
+		request.RemoveBatch(filledBatch)
 		// 提交
 		// Announce decision.
-		announcer.Announce(&log.Entry{Sn: dummyMsg.Sn, Batch: dummyMsg.Batch})
+		announcer.Announce(&log.Entry{Sn: dummyMsg.Sn, Batch: filledBatchMsg})
 	default:
 		logger.Error().
 			Str("msg", fmt.Sprint(m)).
@@ -176,7 +184,7 @@ func (do *DummyOrderer) proposeSN(segment manager.Segment, sn int32) {
 	logger.Trace().Int32("sn", sn).Msg("Creating proposal.")
 
 	// Create request batch and mark it as "in flight"
-	batch := segment.Buckets().CutBatch(config.Config.BatchSize, config.Config.BatchTimeout)
+	batch := segment.Buckets().CutBatch(config.Config.BatchSize, config.Config.BatchTimeout, sn)
 
 	// Create message
 	
@@ -190,9 +198,9 @@ func (do *DummyOrderer) proposeSN(segment manager.Segment, sn int32) {
 	tracing.MainTrace.Event(tracing.PROPOSE, int64(sn), 0)
 	logger.Debug().
 		Int32("sn", sn).
-		Int("nReq", len(orderMsg.
+		Int("nMBHash", len(orderMsg.
 			Msg.(*pb.ProtocolMessage_Dummy).Dummy.
-			Batch.Requests)).
+			Batch.MbHashList)).
 		Msg("Proposing.")
 
 	// Enqueue the message for all followers

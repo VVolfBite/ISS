@@ -47,13 +47,13 @@ func HandleMicroblock(mb *MicroBlock) {
 	}
 	ReceivedMBs[mb.Hash] = struct{}{}
 	mb.FutureTimestamp = time.Now()
-	proposalID, exists := MissingMBs[mb.Hash]
+	sn, exists := MissingMBs[mb.Hash]
 	if exists {
-		pd, exists := PendingBlockMap[proposalID]
+		pd, exists := PendingBlockMap[sn]
 		if exists {
 			block := pd.AddMicroblock(mb)
 			if block != nil {
-				delete(PendingBlockMap, mb.ProposalID)
+				delete(PendingBlockMap, sn)
 				delete(MissingMBs, mb.Hash)
 			}
 		}

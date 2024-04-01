@@ -14,14 +14,14 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rs/zerolog"
-	logger "github.com/rs/zerolog/log"
 	"github.com/hyperledger-labs/mirbft/config"
 	"github.com/hyperledger-labs/mirbft/crypto"
 	"github.com/hyperledger-labs/mirbft/profiling"
 	pb "github.com/hyperledger-labs/mirbft/protobufs"
 	"github.com/hyperledger-labs/mirbft/request"
 	"github.com/hyperledger-labs/mirbft/tracing"
+	"github.com/rs/zerolog"
+	logger "github.com/rs/zerolog/log"
 )
 
 func main() {
@@ -253,89 +253,89 @@ func verifyExternal(batches []*request.Batch, verifierChan chan *request.Request
 }
 
 func verifyBatchSequential(b *request.Batch, pubKey interface{}) {
-	for _, req := range b.Requests {
-		req.Verified = false
-		if err := crypto.CheckSig(req.Digest,
-			pubKey,
-			req.Msg.Signature); err != nil {
-			logger.Warn().
-				Err(err).
-				Int32("clSn", req.Msg.RequestId.ClientSn).
-				Int32("clId", req.Msg.RequestId.ClientId).
-				Msg("Invalid request signature.")
-		} else {
-			req.Verified = true
-		}
-	}
+	// for _, req := range b.Requests {
+	// 	req.Verified = false
+	// 	if err := crypto.CheckSig(req.Digest,
+	// 		pubKey,
+	// 		req.Msg.Signature); err != nil {
+	// 		logger.Warn().
+	// 			Err(err).
+	// 			Int32("clSn", req.Msg.RequestId.ClientSn).
+	// 			Int32("clId", req.Msg.RequestId.ClientId).
+	// 			Msg("Invalid request signature.")
+	// 	} else {
+	// 		req.Verified = true
+	// 	}
+	// }
 }
 
 func verifyBatchParallel(b *request.Batch, pubKey interface{}) {
-	var wg sync.WaitGroup
-	wg.Add(len(b.Requests))
+	// var wg sync.WaitGroup
+	// wg.Add(len(b.Requests))
 
-	for _, r := range b.Requests {
-		r.Verified = false
-		go func(req *request.Request) {
-			if err := crypto.CheckSig(req.Digest,
-				pubKey,
-				req.Msg.Signature); err != nil {
-				logger.Warn().
-					Err(err).
-					Int32("clSn", req.Msg.RequestId.ClientSn).
-					Int32("clId", req.Msg.RequestId.ClientId).
-					Msg("Invalid request signature.")
-			} else {
-				req.Verified = true
-			}
-			wg.Done()
-		}(r)
-	}
+	// for _, r := range b.Requests {
+	// 	r.Verified = false
+	// 	go func(req *request.Request) {
+	// 		if err := crypto.CheckSig(req.Digest,
+	// 			pubKey,
+	// 			req.Msg.Signature); err != nil {
+	// 			logger.Warn().
+	// 				Err(err).
+	// 				Int32("clSn", req.Msg.RequestId.ClientSn).
+	// 				Int32("clId", req.Msg.RequestId.ClientId).
+	// 				Msg("Invalid request signature.")
+	// 		} else {
+	// 			req.Verified = true
+	// 		}
+	// 		wg.Done()
+	// 	}(r)
+	// }
 
-	wg.Wait()
+	// wg.Wait()
 }
 
 func verifyBatchExternal(b *request.Batch, verifierChan chan *request.Request) {
-	verifiedChan := make(chan *request.Request, len(b.Requests))
+	// verifiedChan := make(chan *request.Request, len(b.Requests))
 
-	verifying := 0
-	for _, r := range b.Requests {
-		verifying++
-		r.VerifiedChan = verifiedChan
-		r.Verified = false
-		verifierChan <- r
-	}
+	// verifying := 0
+	// for _, r := range b.Requests {
+	// 	verifying++
+	// 	r.VerifiedChan = verifiedChan
+	// 	r.Verified = false
+	// 	verifierChan <- r
+	// }
 
-	for verifying > 0 {
-		verifying--
-		req := <-verifiedChan
-		req.VerifiedChan = nil
-		if !req.Verified {
-			logger.Warn().
-				Int32("clSn", req.Msg.RequestId.ClientSn).
-				Int32("clId", req.Msg.RequestId.ClientId).
-				Msg("Request signature verification failed.")
-		}
-	}
+	// for verifying > 0 {
+	// 	verifying--
+	// 	req := <-verifiedChan
+	// 	req.VerifiedChan = nil
+	// 	if !req.Verified {
+	// 		logger.Warn().
+	// 			Int32("clSn", req.Msg.RequestId.ClientSn).
+	// 			Int32("clId", req.Msg.RequestId.ClientId).
+	// 			Msg("Request signature verification failed.")
+	// 	}
+	// }
 }
 
 func createBatch(nReq int, privKey interface{}) *request.Batch {
 
-	newBatch := &request.Batch{Requests: make([]*request.Request, nReq, nReq)}
-	for i := 0; i < nReq; i++ {
+	newBatch := &request.Batch{}
+	// for i := 0; i < nReq; i++ {
 
-		reqMsg := createRequest(int32(i), privKey)
-		req := &request.Request{
-			Msg:      reqMsg,
-			Digest:   request.Digest(reqMsg),
-			Buffer:   nil,   // Dummy value
-			Bucket:   nil,   // Dummy value
-			Verified: false, // signature has not yet been verified
-			InFlight: false, // request has not yet been proposed (an identical one might have been, though, in which case we discard this request object)
-			Next:     nil,   // This request object is not part of a bucket list.
-			Prev:     nil,
-		}
-		newBatch.Requests[i] = req
-	}
+	// 	reqMsg := createRequest(int32(i), privKey)
+	// 	req := &request.Request{
+	// 		Msg:      reqMsg,
+	// 		Digest:   request.Digest(reqMsg),
+	// 		Buffer:   nil,   // Dummy value
+	// 		Bucket:   nil,   // Dummy value
+	// 		Verified: false, // signature has not yet been verified
+	// 		InFlight: false, // request has not yet been proposed (an identical one might have been, though, in which case we discard this request object)
+	// 		Next:     nil,   // This request object is not part of a bucket list.
+	// 		Prev:     nil,
+	// 	}
+	// 	newBatch.Requests[i] = req
+	// }
 
 	return newBatch
 }
@@ -426,11 +426,11 @@ func testBatchCutting() {
 
 	bg := request.NewBucketGroup([]int{0, 1})
 
-	logger.Info().Int("len", bg.CountRequests()).Msg("Bucket group created.")
+	logger.Info().Int("len", bg.CountStableMicroBlock()).Msg("Bucket group created.")
 
-	batch := bg.CutBatch(1024, 0)
+	batch := bg.CutBatch(1024, 0 , 0)
 
-	logger.Info().Int("len", len(batch.Requests)).Msg("Batch cut")
+	logger.Info().Int("len", len(batch.MBHashList)).Msg("Batch cut")
 }
 
 func testMapLookpus(numClients int32, numRequests int32) {

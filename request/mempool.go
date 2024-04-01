@@ -77,7 +77,7 @@ func (pool *MemPool) AddReq(txn *Request) (bool, *MicroBlock) {
 	if totalSize > pool.msize {
 		//do not add the curr trans, and generate a microBlock
 		//set the currSize to curr trans, since it is the only one does not add to the microblock
-		var id util.Identifier
+		var id int
 		pool.currSize = tranSize
 		newBlock := NewMicroblock(id, pool.makeTxnSlice())
 		pool.txnList.PushBack(txn)
@@ -98,7 +98,7 @@ func (pool *MemPool) AddReq(txn *Request) (bool, *MicroBlock) {
 
 	} else if totalSize == pool.msize {
 		//add the curr trans, and generate a microBlock
-		var id util.Identifier
+		var id int
 		allTxn := append(pool.makeTxnSlice(), txn)
 		newBlock := NewMicroblock(id, allTxn)
 		pool.currSize = 0
@@ -200,17 +200,10 @@ func (pool *MemPool) AddAck(ack *Ack) {
 
 // GeneratePayload generates a list of microblocks according to bsize
 // if the remaining microblocks is less than bsize then return all
-func (pool *MemPool) GeneratePayload() *Payload {
-	var batchSize int
+func (pool *MemPool) GeneratePayloadWithSize(batchSize int) *Payload {
 	pool.mu.Lock()
 	defer pool.mu.Unlock()
-	sigMap := make(map[util.Identifier]map[int32]util.Signature, 0)
-
-	if pool.stableMicroblocks.Len() >= pool.bsize {
-		batchSize = pool.bsize
-	} else {
-		batchSize = pool.stableMicroblocks.Len()
-	}
+	sigMap := make(map[util.Identifier]map[int32][]byte, 0)
 	microblockList := make([]*MicroBlock, 0)
 
 	for i := 0; i < batchSize; i++ {
@@ -221,7 +214,7 @@ func (pool *MemPool) GeneratePayload() *Payload {
 		//log.Debugf("microblock id: %x is deleted from mempool when proposing", mb.Hash)
 		microblockList = append(microblockList, mb)
 
-		sigs := make(map[int32]util.Signature, 0)
+		sigs := make(map[int32][]byte, 0)
 		count := 0
 		for id, sig := range pool.ackBuffer[mb.Hash] {
 			count++
@@ -264,7 +257,7 @@ func (pool *MemPool) FindMicroblock(id util.Identifier) (bool, *MicroBlock) {
 	return found, mb
 }
 
-func (pool *MemPool) CheckExistence(p *Proposal) (bool, []util.Identifier) {
+func (pool *MemPool) CheckExistence(MBHashList [][]byte) (bool, []util.Identifier) {
 	id := make([]util.Identifier, 0)
 	return false, id
 }
@@ -272,24 +265,24 @@ func (pool *MemPool) CheckExistence(p *Proposal) (bool, []util.Identifier) {
 // FillProposal pulls microblocks from the mempool and build a pending block,
 // a pending block should include the proposal, micorblocks that already exist,
 // and a missing list if there's any
-func (pool *MemPool) FillProposal(p *Proposal) *PendingBlock {
+func (pool *MemPool) FillProposal(MBHashList [][]byte) *PendingBlock {
 	pool.mu.Lock()
 	defer pool.mu.Unlock()
 	existingBlocks := make([]*MicroBlock, 0)
 	missingBlocks := make(map[util.Identifier]struct{}, 0)
-	for _, id := range p.HashList {
+	for _, id := range MBHashList {
 		found := false
-		_, exists := pool.pendingMicroblocks[id]
+		_, exists := pool.pendingMicroblocks[util.BytesToIdentifier(id)]
 		if exists {
 			found = true
-			existingBlocks = append(existingBlocks, pool.pendingMicroblocks[id].Microblock)
-			delete(pool.pendingMicroblocks, id)
+			existingBlocks = append(existingBlocks, pool.pendingMicroblocks[util.BytesToIdentifier(id)].Microblock)
+			delete(pool.pendingMicroblocks, util.BytesToIdentifier(id))
 			//log.Debugf("microblock id: %x is deleted from pending when filling", id)
 		}
 		for e := pool.stableMicroblocks.Front(); e != nil; e = e.Next() {
 			// do something with e.Value
 			mb := e.Value.(*MicroBlock)
-			if mb.Hash == id {
+			if mb.Hash == util.BytesToIdentifier(id) {
 				existingBlocks = append(existingBlocks, mb)
 				found = true
 				pool.stableMicroblocks.Remove(e)
@@ -298,10 +291,10 @@ func (pool *MemPool) FillProposal(p *Proposal) *PendingBlock {
 			}
 		}
 		if !found {
-			missingBlocks[id] = struct{}{}
+			missingBlocks[util.BytesToIdentifier(id)] = struct{}{}
 		}
 	}
-	return NewPendingBlock(p, missingBlocks, existingBlocks)
+	return NewPendingBlock(MBHashList, missingBlocks, existingBlocks)
 }
 
 func (pool *MemPool) IsStable(id util.Identifier) bool {

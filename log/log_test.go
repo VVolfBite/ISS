@@ -36,7 +36,7 @@ func init() {
 	payload2, _ := base64.RawStdEncoding.DecodeString("Entry 2")
 	CommitEntry(&Entry{
 		Sn: 0,
-		Batch: &pb.Batch{
+		Batch: &pb.FilledBatch{
 			Requests: []*pb.ClientRequest{{
 				RequestId: &pb.RequestID{
 					ClientId: 0,
@@ -50,7 +50,7 @@ func init() {
 
 	CommitEntry(&Entry{
 		Sn: 2,
-		Batch: &pb.Batch{
+		Batch: &pb.FilledBatch{
 			Requests: []*pb.ClientRequest{{
 				RequestId: &pb.RequestID{
 					ClientId: 0,
@@ -103,7 +103,7 @@ func TestLog_Subscribe(t *testing.T) {
 
 	CommitEntry(&Entry{
 		Sn: 1,
-		Batch: &pb.Batch{
+		Batch: &pb.FilledBatch{
 			Requests: []*pb.ClientRequest{{
 				RequestId: &pb.RequestID{
 					ClientId: 0,

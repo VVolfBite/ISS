@@ -10,7 +10,6 @@ import "pbftorderer.proto";
 import "hotstufforderer.proto";
 import "raftorderer.proto";
 import "request.proto";
-import "pab.proto";
 import "common.proto";
 
 
