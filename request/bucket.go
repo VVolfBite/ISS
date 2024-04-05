@@ -219,11 +219,11 @@ func (b *Bucket) addNoLock(newReq *Request) (*Request, bool) {
 			//	Msg("Adding new request to bucket.")
 			b.append(newReq)
 			b.reqIndex[reqID] = newReq
-			b.Mempool.AddReq(newReq)
+			new, _ := b.Mempool.AddReq(newReq)
 			// If the Bucket is part of a BucketGroup that is waiting for more requests to arrive,
 			// notify the BucketGroup.
-			if b.Group != nil {
-				b.Group.RequestAdded()
+			if new && b.Group != nil{
+				b.Group.MBAdded()
 			}
 
 			return newReq, false
@@ -282,7 +282,7 @@ func (b *Bucket) Prepend(req *Request) {
 
 		// Notify bucket group if a batch is being cut.
 		if b.Group != nil {
-			b.Group.RequestAdded()
+			b.Group.MBAdded()
 		}
 	}
 }
@@ -329,13 +329,16 @@ func (b *Bucket) PrependMultiple(reqs []*Request) {
 // ATTENTION: Bucket must be LOCKED when calling this method.
 // 改写为 根据要移除的MB数量n追加到dest中，并删除Mb中的Req
 func (b *Bucket) GetBatchAndRemoveReq(n int, dest Batch) Batch {
-	b.Mempool.mu.Lock()
-	defer b.Mempool.mu.Unlock()
+	b.Mempool.MBmu.Lock()
+	defer b.Mempool.MBmu.Unlock()
+
+	
 	payload := b.Mempool.GeneratePayloadWithSize(n)
 	dest.MBHashList = append(dest.MBHashList, payload.GenerateHashList()...)
 	for k, v := range payload.SigMap {
 		// 将 kmap 中的键值对添加到 dest.SigMap 中
 		dest.SigMap[k] = v
+		// logger.Info().Msgf("Here s the proof len: %d",len(v))
 	}
 	// While there are still Requests in the bucket and the limit has not been reached.
 	dest.BucketId = b.id

@@ -218,7 +218,7 @@ func (ri *raftInstance) heartbeat() {
 				msg.Sn = sn
 
 				// Cut immediately a batch
-				batch := ri.segment.Buckets().CutBatch(config.Config.BatchSize, 0, sn)
+				batch := ri.segment.Buckets().CutBatch(config.Config.BatchSize, 10000, sn)
 				logger.Info().
 					Int32("sn", sn).
 					Int("segment", ri.segment.SegID()).

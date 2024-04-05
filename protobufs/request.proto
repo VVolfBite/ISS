@@ -27,8 +27,17 @@ message RequestID {
 message Batch {
     int32 sn = 1;
     repeated bytes mb_hash_list = 2;
-    map<string, MBSig> sig_map = 3;
+    repeated SigmapEntry sig_map = 3;
     int32 bucket_id = 4;
+}
+
+message SigmapEntry{
+    Identifier key = 1;
+    MBSig value = 2;
+}
+
+message MBSig {
+    map<int32, bytes> microblock_sigmap = 1;
 }
 
 message FilledBatch {
@@ -36,9 +45,7 @@ message FilledBatch {
 }
 
 
-message MBSig {
-    map<int32, bytes> microblock_sigmap = 1;
-}
+
 
 message MissingEntryRequest {
     int32 sn = 1;

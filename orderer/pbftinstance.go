@@ -99,8 +99,8 @@ type viewChangeMsg struct {
 
 func (pi *pbftInstance) newViewChangeInfo(view int32) {
 	viewChange := &viewChangeInfo{
-		view: view,
-		s:    make(map[int32]*viewChangeMsg),
+		view:                       view,
+		s:                          make(map[int32]*viewChangeMsg),
 		fetchingMissingPreprepares: false,
 	}
 	pi.viewChange[view] = viewChange
@@ -189,14 +189,12 @@ func (pi *pbftInstance) lead() {
 
 	// Simulate a straggler.
 	if membership.SimulatedCrashes[membership.OwnID] != nil && config.Config.CrashTiming == "Straggler" {
-		config.Config.BatchTimeoutMs = int(0.5*float64(config.Config.ViewChangeTimeoutMs))
+		config.Config.BatchTimeoutMs = int(0.5 * float64(config.Config.ViewChangeTimeoutMs))
 		config.Config.BatchTimeout = time.Duration(config.Config.BatchTimeoutMs) * time.Millisecond
 		logger.Info().Str("byzantine", config.Config.CrashTiming).Int("batchTimeout", config.Config.BatchTimeoutMs)
 		// we set the batchsize to an infinate practically size, so that we always wait for the timeout
 		batchSize = 1000000000
 	}
-
-
 
 	// Send a proposal for each sequence number in the Segment.
 	for _, sn := range pi.segment.SNs() {
@@ -209,7 +207,7 @@ func (pi *pbftInstance) lead() {
 		// batch cutting to 0. The signatures still need to be verified though, but the configuration option of early
 		// request verification should alleviate this problem.
 		logger.Debug().Int("batchSize", pi.segment.BatchSize()).Msg("Waiting for batch.")
-		pi.segment.Buckets().WaitForRequests(batchSize, config.Config.BatchTimeout)
+		pi.segment.Buckets().WaitForMBs(batchSize, config.Config.BatchTimeout)
 		logger.Debug().Int("batchSize", pi.segment.BatchSize()).Msg("Batch ready.")
 
 		// Create message to serve as a placeholder for proposing a batch.
@@ -261,12 +259,13 @@ func (pi *pbftInstance) proposeSN(preprepare *pb.PbftPreprepare, sn int32) {
 	// Simulate a straggler.
 	batchSize := pi.segment.BatchSize()
 	if membership.SimulatedCrashes[membership.OwnID] != nil && config.Config.CrashTiming == "Straggler" {
-			// we cut an empty batch to maximize damage
-			batchSize = 0
+		// we cut an empty batch to maximize damage
+		batchSize = 0
 	}
 
 	// Create the actual request batch. The timeout is 0, since the we already waited for the batch in pi.lead().
-	batch := pi.segment.Buckets().CutBatch(batchSize, 0 , sn)
+	batch := pi.segment.Buckets().CutBatch(batchSize, 10000, sn)
+	// logger.Info().Msgf("Lookhere a new for mb %d batch gen: %d ",batch.Sn,len(batch.MBHashList))
 
 	// Notify batch cutting goroutine that it can start waiting for the next batch.
 	pi.cutBatch <- struct{}{}
@@ -279,6 +278,8 @@ func (pi *pbftInstance) proposeSN(preprepare *pb.PbftPreprepare, sn int32) {
 	}
 	// batch.MarkInFlight()
 	preprepare.Batch = batch.Message()
+
+	// logger.Info().Msgf("Lookhere a new msg for mb %x batch gen: %d",preprepare.Batch.Sn,len(batch.MBHashList))
 
 	// This is technically not necessary, as new batches are only proposed in view 0
 	preprepare.View = pi.view
@@ -308,7 +309,7 @@ func (pi *pbftInstance) proposeSN(preprepare *pb.PbftPreprepare, sn int32) {
 			Preprepare: preprepare,
 		},
 	}
-
+	// logger.Info().Msgf("Logging in at %d and with len %d ", batch.Sn, len(batch.MBHashList))
 	tracing.MainTrace.Event(tracing.PROPOSE, int64(sn), int64(len(batch.MBHashList)))
 
 	// Enqueue the message for all followers
@@ -369,12 +370,14 @@ func (pi *pbftInstance) handlePreprepare(preprepare *pb.PbftPreprepare, msg *pb.
 	}
 
 	// Check that proposal requests are valid
+
 	batch.batch = request.NewBatch(preprepare.Batch)
 	if batch.batch == nil {
 		logger.Error().Int32("peerId", senderID).Int32("sn", sn).Msg("Invalid requests in proposal.")
 		pi.sendViewChange()
 		return fmt.Errorf("proposal from %d contains invalid requests", senderID)
 	}
+
 	// Check that proposal does not contain preprepared ("in flight") requests.
 	// if err := batch.batch.CheckInFlight(); err != nil {
 	// 	return fmt.Errorf("proposal from %d contains in flight requests: %s", senderID, err.Error())
@@ -383,6 +386,7 @@ func (pi *pbftInstance) handlePreprepare(preprepare *pb.PbftPreprepare, msg *pb.
 	if err := batch.batch.CheckBucket(pi.segment.Buckets().GetBucketIDs()); err != nil {
 		return fmt.Errorf("proposal from %d contains in requests from invalid bucket: %s", senderID, err.Error())
 	}
+	// logger.Info().Msgf("Logging out at %d with len: %d ", preprepare.Batch.Sn, len(preprepare.Batch.MbHashList))
 	// Mark requests as preprepared
 	// batch.batch.MarkInFlight()
 
@@ -400,7 +404,6 @@ func (pi *pbftInstance) handlePreprepare(preprepare *pb.PbftPreprepare, msg *pb.
 	}
 
 	if !batch.committed && batch.CheckCommits() {
-
 		////  TODO: Remove this!
 		//// DEBUG
 		//// Make 2 peers not commit anything in view 0
@@ -408,14 +411,30 @@ func (pi *pbftInstance) handlePreprepare(preprepare *pb.PbftPreprepare, msg *pb.
 		//	logger.Warn().Int32("sn", sn).Int("segID", pi.segment.SegID()).Int32("ownID", membership.OwnID).Msg("DEBUG: not committing!")
 		//	return nil
 		//}
+		if batch.viewChangeTimer != nil {
+			notFired := batch.viewChangeTimer.Stop()
+			if !notFired {
+				// This is harmelss, since the timeout, even though generated, will be ignored.
+				logger.Warn().Int32("sn", sn).Msg("Timer fired concurrently with being canceled.")
+			}
+		}
+		// Mark batch as committed.
+		batch.committed = true
 		go func() {
+			var filledBatch *request.FilledBatch // 声明变量
+			// logger.Info().Msgf("About to fill batch from sender %d at %d", preprepare.GetLeader(),membership.OwnID)
 			for {
-				filledBatch := batch.batch.FillBatch(batch.batch.Sn)
-				if filledBatch != nil {
-					pi.announce(batch, sn, filledBatch.Message(), preprepare.Aborted, preprepare.Ts, batch.lastCommitTs)
-					break // 如果成功调用了 announce，则退出循环
+				filledBatch = batch.batch.FillBatch(batch.batch.Sn) // 更新变量值
+				if filledBatch == nil {
+					time.Sleep(time.Second)
+					continue // 使用 continue 替换 break
 				}
-				time.Sleep(time.Second) // 每次重试之间等待一段时间，避免过于频繁的重试
+				//logger.Info().Msgf("Filled completed")
+				break // 如果 filledBatch 不为 nil，跳出循环
+			}
+			if filledBatch != nil { // 确保 filledBatch 不为 nil
+				filledBatchMsg := filledBatch.Message()
+				pi.announce(batch, sn, filledBatchMsg, preprepare.Aborted, preprepare.Ts, batch.lastCommitTs)
 			}
 		}()
 	}
@@ -500,7 +519,16 @@ func (pi *pbftInstance) handlePrepare(prepare *pb.PbftPrepare, msg *pb.ProtocolM
 	}
 
 	if !batch.committed && batch.CheckCommits() {
+		if batch.viewChangeTimer != nil {
+			notFired := batch.viewChangeTimer.Stop()
+			if !notFired {
+				// This is harmelss, since the timeout, even though generated, will be ignored.
+				logger.Warn().Int32("sn", sn).Msg("Timer fired concurrently with being canceled.")
+			}
+		}
 
+		// Mark batch as committed.
+		batch.committed = true
 		////  TODO: Remove this!
 		//// DEBUG
 		//// Make 2 peers not commit anything in view 0
@@ -509,14 +537,20 @@ func (pi *pbftInstance) handlePrepare(prepare *pb.PbftPrepare, msg *pb.ProtocolM
 		//	return nil
 		//}
 		go func() {
+			// logger.Info().Msgf("About to fill batch at %d",membership.OwnID)
+			var filledBatch *request.FilledBatch
 			for {
-				filledBatch := request.NewBatch(batch.preprepareMsg.Batch).FillBatch(int(sn)).Message()
-				if filledBatch != nil {
-					pi.announce(batch, sn, filledBatch, batch.preprepareMsg.Aborted, batch.preprepareMsg.Ts, batch.lastCommitTs)
-					break // 如果成功调用了 announce，则退出循环
+				newBatch := request.NewBatch(batch.preprepareMsg.Batch)
+				filledBatch = newBatch.FillBatch(int(sn))
+				if filledBatch == nil {
+					time.Sleep(time.Second)
+					continue
 				}
-				time.Sleep(time.Second) // 每次重试之间等待一段时间，避免过于频繁的重试
+				// logger.Info().Msgf("Filled completed")
+				break
 			}
+			filledBatchMsg := filledBatch.Message()
+			pi.announce(batch, sn, filledBatchMsg, batch.preprepareMsg.Aborted, batch.preprepareMsg.Ts, batch.lastCommitTs)
 		}()
 	}
 
@@ -600,7 +634,16 @@ func (pi *pbftInstance) handleCommit(commit *pb.PbftCommit, msg *pb.ProtocolMess
 	batch.commitMsgs[senderID] = commit
 
 	if !batch.committed && batch.CheckCommits() {
+		if batch.viewChangeTimer != nil {
+			notFired := batch.viewChangeTimer.Stop()
+			if !notFired {
+				// This is harmelss, since the timeout, even though generated, will be ignored.
+				logger.Warn().Int32("sn", sn).Msg("Timer fired concurrently with being canceled.")
+			}
+		}
 
+		// Mark batch as committed.
+		batch.committed = true
 		////  TODO: Remove this!
 		//// DEBUG
 		//// Make 2 peers not commit anything in view 0
@@ -609,14 +652,20 @@ func (pi *pbftInstance) handleCommit(commit *pb.PbftCommit, msg *pb.ProtocolMess
 		//	return nil
 		//}
 		go func() {
+			// logger.Info().Msgf("About to fill batch at %d",membership.OwnID)
+			var filledBatch *request.FilledBatch
 			for {
-				filledBatch := request.NewBatch(batch.preprepareMsg.Batch).FillBatch(int(sn)).Message()
-				if filledBatch != nil {
-					pi.announce(batch, sn, filledBatch, batch.preprepareMsg.Aborted, batch.preprepareMsg.Ts, batch.lastCommitTs)
-					break // 如果成功调用了 announce，则退出循环
+				newBatch := request.NewBatch(batch.preprepareMsg.Batch)
+				filledBatch = newBatch.FillBatch(newBatch.Sn)
+				if filledBatch == nil {
+					time.Sleep(time.Second)
+					continue
 				}
-				time.Sleep(time.Second) // 每次重试之间等待一段时间，避免过于频繁的重试
+				// logger.Info().Msgf("Filled completed")
+				break
 			}
+			filledBatchMsg := filledBatch.Message()
+			pi.announce(batch, sn, filledBatchMsg, batch.preprepareMsg.Aborted, batch.preprepareMsg.Ts, batch.lastCommitTs)
 		}()
 	}
 
@@ -646,22 +695,17 @@ func (pi *pbftInstance) handleMissingEntry(msg *pb.MissingEntry) {
 		batch.digest = msg.Digest
 		// We must not touch the preprepared or prepared flag to prevent potential segfaults,
 		// as the prepare messages and the preprepare message might still be absent.
+		if batch.viewChangeTimer != nil {
+			batch.viewChangeTimer.Stop()
+		}
 
+		// Mark batch as committed.
+		batch.committed = true
 		pi.announce(batch, msg.Sn, msg.Batch, msg.Aborted, pi.startTs, time.Now().UnixNano())
 	}
 }
 
 func (pi *pbftInstance) announce(batch *pbftBatch, sn int32, reqBatch *pb.FilledBatch, aborted bool, proposeTs int64, commitTs int64) {
-	if batch.viewChangeTimer != nil {
-		notFired := batch.viewChangeTimer.Stop()
-		if !notFired {
-			// This is harmelss, since the timeout, even though generated, will be ignored.
-			logger.Warn().Int32("sn", sn).Msg("Timer fired concurrently with being canceled.")
-		}
-	}
-
-	// Mark batch as committed.
-	batch.committed = true
 
 	// Remove batch requests
 	request.RemoveBatch(request.NewFilledBatch(reqBatch))
@@ -1088,8 +1132,8 @@ func (pi *pbftInstance) maybeSendNewView(view int32) {
 						Leader: membership.OwnID,
 						Batch: &pb.Batch{
 							MbHashList: make([][]byte, 0),
-							SigMap: make(map[string]*pb.MBSig),
-							BucketId: -1,
+							SigMap:     make([]*pb.SigmapEntry, 0),
+							BucketId:   -1,
 						},
 						Aborted: true,
 
@@ -1102,7 +1146,7 @@ func (pi *pbftInstance) maybeSendNewView(view int32) {
 					}
 					vci.reproposeBatches[sn] = &pbftBatch{
 						preprepareMsg: emptyPreprepare,
-						batch:         &request.Batch{MBHashList: make([][]byte, 0, 0) , SigMap: make(map[util.Identifier]map[int32][]byte)},
+						batch:         &request.Batch{MBHashList: make([][]byte, 0, 0), SigMap: make(map[util.Identifier]map[int32][]byte)},
 						digest:        pbftDigest(emptyPreprepare),
 						committed:     false,
 					}
@@ -1941,7 +1985,7 @@ func (pi *pbftInstance) setViewChangeTimer(sn int32, after time.Duration) {
 				View: pi.view,
 			}},
 	}
-	batch.viewChangeTimer = time.AfterFunc(pi.viewChangeTimeout + after, func() { pi.serializer.serialize(msg) })
+	batch.viewChangeTimer = time.AfterFunc(pi.viewChangeTimeout+after, func() { pi.serializer.serialize(msg) })
 }
 
 // Looks for the most recent batch with a preprepare message with sequence number sn in previous views.
@@ -2009,8 +2053,8 @@ func (pi *pbftInstance) startView(view int32) {
 			// If we have a median commitTime from previous epochs
 			// Set an adaptive timeout for each batch
 			if pi.orderer.commitTime != 0 {
-				pi.setViewChangeTimer(sn, time.Duration(i) * config.Config.BatchTimeout + pi.orderer.commitTime)
-				logger.Info().Int64("initial",int64(config.Config.BatchTimeout)).Int64("advanced",int64(time.Duration(i) * config.Config.BatchTimeout + pi.orderer.commitTime)).Msg("Advanced timeout")
+				pi.setViewChangeTimer(sn, time.Duration(i)*config.Config.BatchTimeout+pi.orderer.commitTime)
+				logger.Info().Int64("initial", int64(config.Config.BatchTimeout)).Int64("advanced", int64(time.Duration(i)*config.Config.BatchTimeout+pi.orderer.commitTime)).Msg("Advanced timeout")
 			}
 
 			// Except for at initialization, carry over state from the previous view.

@@ -184,6 +184,7 @@ type Request struct {
 
 // Allocates a new Request object from a client request message and adds it by calling Add().
 func AddReqMsg(reqMsg *pb.ClientRequest) *Request {
+	
 	return Add(&Request{
 		Msg:      reqMsg,
 		Digest:   Digest(reqMsg),
@@ -199,7 +200,6 @@ func AddReqMsg(reqMsg *pb.ClientRequest) *Request {
 // Adds a request received as a protobuf message to the appropriate buffer and bucket.
 // 将Req加入他的Buffer和Bucket
 func Add(req *Request) *Request {
-
 	// The buffer needs to be Rlocked not only while checking watermarks, but also while adding the request to the Bucket!
 	req.Buffer.RLock()
 	defer req.Buffer.RUnlock()
@@ -281,7 +281,6 @@ func RemoveBatch(batch *FilledBatch) {
 // This allows new Requests to be added to the Buffers.
 // 推进WM， 推进时先推进所有的Buffer完毕，再推进所有的Bucket完毕
 func AdvanceWatermarks(entries []interface{}) { //expected type is []*log.Entry
-	logger.Info().Int("numEntries", len(entries)).Msg("Advancing watermarks.")
 
 	// We only acquire a read lock on the buffers map, since the map itself is not modified.
 	// What is modified is the Buffers the map entries point to, but those have their own locks.

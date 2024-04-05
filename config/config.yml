@@ -87,7 +87,7 @@ DefaultLeaderBan: 2         # The default number of epochs a node is excluded fr
                             # Applies only to {Backoff, Combined} leader selection policies.
 
 # Orderer config
-NumBuckets: 8              # Total number of buckets. Should be at least as many as the number of potential leaders.
+NumBuckets: 4              # Total number of buckets. Should be at least as many as the number of potential leaders.
 BatchSize: 40               # Maximum number of requests per batch
 BatchTimeout: 50            # Timeout (ms) to cut batch when the bucket has less requests than the BatchSize.
 

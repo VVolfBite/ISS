@@ -112,6 +112,15 @@ func handleMessage(msg *pb.ProtocolMessage, srv pb.Messenger_ListenServer) (fini
 	if Crashed {
 		return
 	}
+	
+	// switch m := msg.Msg.(type) {
+	// case *pb.ProtocolMessage_Preprepare:
+	// 	preprepare := m.Preprepare
+	// 	logger.Info().Msgf("Incoming Preprepare message:%x",len(preprepare.Batch.MbHashList))
+	// default:
+	// 	// 其他类型的消息，可以在这里添加处理逻辑
+	// 	logger.Info().Msg("Unknown message type")
+	// }
 
 	switch m := msg.Msg.(type) {
 	case *pb.ProtocolMessage_Multi:
@@ -284,7 +293,7 @@ func EnqueueMsg(msg *pb.ProtocolMessage, destNodeID int32) {
 // also must not be called concurrently with EnqueueMessage with the same destNodeID.
 // 向节点destodeId发送存在优先级的信息
 func EnqueuePriorityMsg(msg *pb.ProtocolMessage, destNodeID int32) {
-
+	
 	// WARNING: If a simulate crash, the peer ignores all messages
 	if Crashed {
 		return
@@ -293,6 +302,15 @@ func EnqueuePriorityMsg(msg *pb.ProtocolMessage, destNodeID int32) {
 	if peerConnections[destNodeID] == nil {
 		logger.Error().Int32("nodeID", destNodeID).Msg("Cannot enqueue message. Node not connected.")
 	} else {
+		// switch m := msg.Msg.(type) {
+		
+		// case *pb.ProtocolMessage_Preprepare:
+		// 	preprepare := m.Preprepare
+		// 	logger.Info().Int32("SenderId", msg.SenderId).Int32("Sn", msg.Sn).Interface("Preprepare", preprepare).Msg("PBFT Preprepare message")
+		// default:
+		// 	logger.Info().Msg("Unknown message type")
+		// }
+
 		peerConnections[destNodeID].SendPriority(msg)
 	}
 }

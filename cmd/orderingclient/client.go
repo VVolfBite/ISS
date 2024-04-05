@@ -8,8 +8,6 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/rs/zerolog"
-	logger "github.com/rs/zerolog/log"
 	"github.com/hyperledger-labs/mirbft/config"
 	"github.com/hyperledger-labs/mirbft/crypto"
 	"github.com/hyperledger-labs/mirbft/discovery"
@@ -19,6 +17,8 @@ import (
 	pb "github.com/hyperledger-labs/mirbft/protobufs"
 	"github.com/hyperledger-labs/mirbft/request"
 	"github.com/hyperledger-labs/mirbft/tracing"
+	"github.com/rs/zerolog"
+	logger "github.com/rs/zerolog/log"
 	"google.golang.org/grpc"
 )
 
@@ -36,7 +36,7 @@ type client struct {
 
 	// Number of requests the client tries to submit before stopping.
 	// Set to 0 for no limit (and define a running time to make the client stop after a certain time).
-	numRequests int
+	numMBs int
 
 	// Set to a non-zero value to stop submitting requests.
 	// A boolean type of this variable would better reflect its semantics,
@@ -112,16 +112,16 @@ type client struct {
 }
 
 // Allocates and returns a pointer to a new client.
-func newClient(dServAddr string, numRequests int) *client {
+func newClient(dServAddr string, numMBs int) *client {
 	cl := &client{
 		ownClientID:            -1,
-		numRequests:            numRequests,
+		numMBs:                 numMBs,
 		requests:               make(map[int32]*pb.ClientRequest),
-		responses:              make(map[int32]map[int32]bool, numRequests),
-		submittedTo:            make(map[int32]map[int32]bool, numRequests),
-		sentTimestamps:         make(map[int32]int64, numRequests),
-		submitTimestamps:       make(map[int32]int64, numRequests),
-		finished:               make(map[int32]bool, numRequests),
+		responses:              make(map[int32]map[int32]bool, numMBs),
+		submittedTo:            make(map[int32]map[int32]bool, numMBs),
+		sentTimestamps:         make(map[int32]int64, numMBs),
+		submitTimestamps:       make(map[int32]int64, numMBs),
+		finished:               make(map[int32]bool, numMBs),
 		oldestClientSN:         0,
 		watermarkWindow:        make(chan *pb.ClientRequest, config.Config.ClientWatermarkWindowSize),
 		sendBufferSize:         config.Config.ClientWatermarkWindowSize,
@@ -165,8 +165,8 @@ func newClient(dServAddr string, numRequests int) *client {
 
 	// Generate all request messages if configured to do so
 	if config.Config.PrecomputeRequests {
-		cl.log.Info().Int("numRequests", numRequests).Msg("Precomputing requests.")
-		for seqNr := int32(0); seqNr < int32(cl.numRequests); seqNr++ {
+		cl.log.Info().Int("numMBs", numMBs).Msg("Precomputing requests.")
+		for seqNr := int32(0); seqNr < int32(cl.numMBs); seqNr++ {
 			cl.requests[seqNr] = cl.createRequest(seqNr)
 		}
 	}
@@ -236,8 +236,8 @@ func (c *client) Run(wg *sync.WaitGroup) {
 	var ordererIDs []int32
 	if config.Config.LeaderPolicy == "SimulatedRandomFailures" {
 		ordererIDs = manager.NewLeaderPolicy(config.Config.LeaderPolicy).GetLeaders(0)
-	//} else if config.Config.Failures > 0 && (config.Config.CrashTiming == "EpochStart" || config.Config.CrashTiming == "EpochEnd") {
-	//	ordererIDs = membership.CorrectPeers()
+		//} else if config.Config.Failures > 0 && (config.Config.CrashTiming == "EpochStart" || config.Config.CrashTiming == "EpochEnd") {
+		//	ordererIDs = membership.CorrectPeers()
 	} else {
 		ordererIDs = membership.AllNodeIDs()
 	}
@@ -271,14 +271,14 @@ func (c *client) Run(wg *sync.WaitGroup) {
 			})
 		}
 
-		c.log.Info().Int("numRequests", c.numRequests).Msg("Starting to submit requests.")
+		c.log.Info().Int("numMBs", c.numMBs).Msg("Starting to submit requests.")
 
 		timeBetweenRequests := int64(1000000 / config.Config.RequestRate)
 		nextSubmitTime := time.Now().UnixNano() / 1000 // Submit first request immediately
 
 		// Submit requests
 		var i int32
-		for i = int32(0); i < int32(c.numRequests) && atomic.LoadInt32(&c.stop) == 0; i++ {
+		for i = int32(0); i < int32(c.numMBs) && atomic.LoadInt32(&c.stop) == 0; i++ {
 
 			// Before submitting each request, wait for some time to respect the maximum request rate.
 			// We only wait the necessary duration and always compute the nextSubmitTime based on the time the current
@@ -370,7 +370,9 @@ func (c *client) sendRequests(ordererID int32, clientStub pb.Messenger_RequestCl
 			c.Lock()
 			c.sentTimestamps[req.RequestId.ClientSn] = time.Now().UnixNano() / 1000 // In us
 			c.Unlock()
+			// c.log.Info().Msgf("Adding %d",req.RequestId.ClientSn)
 			if err := clientStub.Send(req); err != nil {
+				
 				c.log.Error().Err(err).
 					Int32("ordererId", ordererID).
 					Int32("clSeqNr", req.RequestId.ClientSn).
@@ -603,7 +605,7 @@ func (c *client) resubmitPendingRequests() {
 			// Get request itself and it new destinations.
 			req := c.requests[seqNr]
 			destIDs := c.guessTargetOrderers(req)
-			c.log.Trace().
+			c.log.Info().
 				Int32("clSeqNr", req.RequestId.ClientSn).
 				Interface("dest", destIDs).
 				Msg("Resubmitting Request.")
@@ -611,7 +613,6 @@ func (c *client) resubmitPendingRequests() {
 			// Resubmit request.
 			for _, destID := range destIDs {
 				if !submitted[destID] {
-
 					resubmitted++
 					c.reqSinks[destID] <- req
 					submitted[destID] = true

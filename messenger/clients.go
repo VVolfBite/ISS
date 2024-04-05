@@ -50,7 +50,7 @@ var (
 // client. Submits all subsequent requests to the registered handler function.
 // 这个应该是提供给客户的grpc连接方法 request 发起请求
 func (ms *messengerServer) Request(srv pb.Messenger_RequestServer) error {
-
+	
 	// WARNING: If a simulate crash, the peer ignores all messages
 	// 模拟Crash
 	if Crashed {

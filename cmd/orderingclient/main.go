@@ -5,11 +5,11 @@ import (
 	"os"
 	"sync"
 
-	"github.com/rs/zerolog"
-	logger "github.com/rs/zerolog/log"
 	"github.com/hyperledger-labs/mirbft/config"
 	"github.com/hyperledger-labs/mirbft/membership"
 	"github.com/hyperledger-labs/mirbft/profiling"
+	"github.com/rs/zerolog"
+	logger "github.com/rs/zerolog/log"
 )
 
 var (
@@ -74,7 +74,7 @@ func main() {
 
 	// Get number of clients and number of requests / client.
 	numClients := config.Config.ClientsPerProcess
-	numRequests := config.Config.RequestsPerClient
+	numMBs := config.Config.RequestsPerClient
 
 	// Generate random request payload
 	randomRequestPayload = make([]byte, config.Config.RequestPayloadSize)
@@ -82,7 +82,7 @@ func main() {
 
 	logger.Info().
 		Int("numClients", numClients).
-		Int("numRequests", numRequests).
+		Int("numMBs", numMBs).
 		Msg("Starting clients.")
 
 	// Create wait group for initializing and running clients
@@ -93,7 +93,7 @@ func main() {
 	clients := make([]*client, numClients)
 	wg.Add(numClients)
 	for i := 0; i < numClients; i++ {
-		go func(j int) { clients[j] = newClient(dServAddr, numRequests); wg.Done() }(i)
+		go func(j int) { clients[j] = newClient(dServAddr, numMBs); wg.Done() }(i)
 	}
 
 	// Wait until all clients are initialized.

@@ -40,6 +40,7 @@ func HandlePABMsg(protocolMsg *pb.ProtocolMessage) {
 func HandleMicroblock(mb *MicroBlock) {
 	RMBmu.Lock()
 	defer RMBmu.Unlock()
+	
 	_, exist := ReceivedMBs[mb.Hash]
 
 	if exist {
@@ -59,6 +60,7 @@ func HandleMicroblock(mb *MicroBlock) {
 		}
 	} else {
 		// 不然对方却的也是自己缺少的，加入mempool
+		// logger.Info().Msgf("Rece in a mb %x of bucket %d",mb.Hash,mb.BucketID)
 		err := Buckets[mb.BucketID].Mempool.AddMicroblock(mb)
 		if err != nil {
 			logger.Error().Msg("Adding incoming microblock failed")
@@ -106,6 +108,7 @@ func HandleMicroblock(mb *MicroBlock) {
 func HandleAck(ack *Ack) {
 	//if config.Configuration.MemType == "time" {
 	//	r.estimator.AddAck(ack)
+	// logger.Info().Msgf("Receing ack on %x from %d",ack.MicroblockID,ack.Receiver)
 	if Buckets[ack.BucketID].Mempool.IsStable(ack.MicroblockID) {
 		return
 	}

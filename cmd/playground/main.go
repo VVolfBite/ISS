@@ -428,12 +428,12 @@ func testBatchCutting() {
 
 	logger.Info().Int("len", bg.CountStableMicroBlock()).Msg("Bucket group created.")
 
-	batch := bg.CutBatch(1024, 0 , 0)
+	batch := bg.CutBatch(1024, 10000, 0)
 
 	logger.Info().Int("len", len(batch.MBHashList)).Msg("Batch cut")
 }
 
-func testMapLookpus(numClients int32, numRequests int32) {
+func testMapLookpus(numClients int32, numMBs int32) {
 
 	type reqID struct {
 		clID int32
@@ -452,7 +452,7 @@ func testMapLookpus(numClients int32, numRequests int32) {
 
 	// Fill flat map
 	start := time.Now()
-	for clSN := int32(0); clSN < numRequests; clSN++ {
+	for clSN := int32(0); clSN < numMBs; clSN++ {
 		for clID := int32(0); clID < numClients; clID++ {
 			reqID := int64(clID)<<32 + int64(clSN)
 			flatMap[reqID] = dummyRequest
@@ -462,7 +462,7 @@ func testMapLookpus(numClients int32, numRequests int32) {
 
 	// Fill nested map
 	start = time.Now()
-	for clSN := int32(0); clSN < numRequests; clSN++ {
+	for clSN := int32(0); clSN < numMBs; clSN++ {
 		for clID := int32(0); clID < numClients; clID++ {
 			clMap, ok := nestedMap[clID]
 			if !ok {
@@ -476,7 +476,7 @@ func testMapLookpus(numClients int32, numRequests int32) {
 
 	// Fill struct map
 	start = time.Now()
-	for clSN := int32(0); clSN < numRequests; clSN++ {
+	for clSN := int32(0); clSN < numMBs; clSN++ {
 		for clID := int32(0); clID < numClients; clID++ {
 			reqID := reqID{
 				clID: clID,
@@ -489,7 +489,7 @@ func testMapLookpus(numClients int32, numRequests int32) {
 
 	// Look up in flat map
 	start = time.Now()
-	for clSN := int32(0); clSN < numRequests; clSN++ {
+	for clSN := int32(0); clSN < numMBs; clSN++ {
 		for clID := int32(0); clID < numClients; clID++ {
 			reqID := int64(clID)<<32 + int64(clSN)
 			req := flatMap[reqID]
@@ -500,7 +500,7 @@ func testMapLookpus(numClients int32, numRequests int32) {
 
 	// Look up in nested map
 	start = time.Now()
-	for clSN := int32(0); clSN < numRequests; clSN++ {
+	for clSN := int32(0); clSN < numMBs; clSN++ {
 		for clID := int32(0); clID < numClients; clID++ {
 			clMap, ok := nestedMap[clID]
 			if !ok {
@@ -514,7 +514,7 @@ func testMapLookpus(numClients int32, numRequests int32) {
 
 	// Look up in flat map
 	start = time.Now()
-	for clSN := int32(0); clSN < numRequests; clSN++ {
+	for clSN := int32(0); clSN < numMBs; clSN++ {
 		for clID := int32(0); clID < numClients; clID++ {
 			reqID := reqID{
 				clID: clID,
@@ -528,7 +528,7 @@ func testMapLookpus(numClients int32, numRequests int32) {
 
 	fmt.Printf("% 14d % 14d % 14d % 14d % 14d % 14d %14d %14d\n",
 		numClients,
-		numRequests,
+		numMBs,
 		initFlatTime.Nanoseconds()/1000000,
 		initStructTime.Nanoseconds()/1000000,
 		initNestedTime.Nanoseconds()/1000000,

@@ -121,7 +121,7 @@ func (hi *hotStuffInstance) init(seg manager.Segment, orderer *HotStuffOrderer) 
 		Parent: nil,
 		Batch: &pb.Batch{
 			MbHashList: make([][]byte, 0 ,0),
-			SigMap: make(map[string]*pb.MBSig),
+			SigMap: make([]*pb.SigmapEntry, 0),
 			BucketId: -1,
 		},
 		Certificate: &pb.HotStuffQC{

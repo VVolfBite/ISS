@@ -12,10 +12,10 @@ import (
 	"os"
 	"strconv"
 
-	logger "github.com/rs/zerolog/log"
 	"github.com/hyperledger-labs/mirbft/config"
 	"github.com/hyperledger-labs/mirbft/messenger"
 	pb "github.com/hyperledger-labs/mirbft/protobufs"
+	logger "github.com/rs/zerolog/log"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )
@@ -98,7 +98,7 @@ func (ts *testServer) Test(srv pb.TestService_TestServer) error {
 		gbps := float64(payloadSize*nRequests*8) / float64(endTime-startItme) // In Gbps
 		logger.Info().
 			Int("payloadSize", payloadSize).
-			Int("numRequests", nRequests).
+			Int("numMBs", nRequests).
 			Int64("duration", duration).
 			Float64("Gbps", gbps).
 			Msg("Done Receiving.")
@@ -194,7 +194,7 @@ func runClient(clID int, serverAddr string, wg *sync.WaitGroup) {
 			gbps := float64(payloadSize*nRequests*8) / float64(endTime-startItme) // In Gbps
 			clientLog.Info().
 				Int("payloadSize", payloadSize).
-				Int("numRequests", nRequests).
+				Int("numMBs", nRequests).
 				Int64("duration", duration).
 				Float64("Gbps", gbps).
 				Msg("Done sending requests.")

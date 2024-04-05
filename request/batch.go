@@ -16,11 +16,6 @@ package request
 
 import (
 	"fmt"
-	"sync"
-
-	// "sync"
-	// "sync/atomic"
-
 	// "github.com/hyperledger-labs/mirbft/config"
 	"github.com/hyperledger-labs/mirbft/crypto"
 	"github.com/hyperledger-labs/mirbft/membership"
@@ -45,32 +40,55 @@ type FilledBatch struct {
 }
 
 // fillBatch 会对Batch进行填充，调用者需要自己开启线程保证不要阻塞
-func (b *Batch) FillBatch(proposerId int) *FilledBatch {
-	var wg sync.WaitGroup
+func (b *Batch) FillBatch(sn int) *FilledBatch {
+	// logger.Info().Msgf("We are dealing proposal %d",sn)
+	// logger.Info().Msgf("Its a batch with %d",len(b.MBHashList))
+	// for i,mbhash := range b.MBHashList{
+	// 	logger.Info().Msgf("%d : %x",i,mbhash)
+	// 	if Buckets[b.BucketId].Mempool.microblockMap[util.BytesToIdentifier(mbhash)] != nil{
+	// 		logger.Info().Msgf("This mb has backup in the pool")
+	// 	}
+	// }
+
+	// return &FilledBatch{
+	// 	Requests: make([]*Request, 0),
+	// }
+
 	newFilledBatch := &FilledBatch{
 		Requests: make([]*Request, 0),
 	}
+
+	if len(b.MBHashList) == 0 {
+		return newFilledBatch
+	}
+
 	// 初始化 BucketMBHashList 的 map
 	bucketID := b.BucketId
-	
-	defer wg.Done()
 	var MissingMBList []*pb.Identifier
 	pendingBlock := Buckets[bucketID].Mempool.FillProposal(b.MBHashList)
+
+	// logger.Info().Msgf("Pending block sn:%d with mb: %d and missing:%d", b.Sn, len(pendingBlock.MBHashList), len(pendingBlock.MissingMap))
+	// logger.Info().Msgf("Pending block is from bucket %d", b.BucketId)
+
+	
+
 	block := pendingBlock.CompleteBlock()
+	
 	if block != nil {
-		logger.Debug().Msgf("[%v] a block is ready, id: %x", membership.OwnID, b.Sn)
-		for _, mb :=  range block.Payload.MicroblockList{
-			newFilledBatch.Requests = append(newFilledBatch.Requests, mb.Txns...) 
+		logger.Info().Msgf("[%v] a block is ready, id: %d", membership.OwnID, b.Sn)
+		for _, mb := range block.Payload.MicroblockList {
+			newFilledBatch.Requests = append(newFilledBatch.Requests, mb.Txns...)
 		}
+		return newFilledBatch
 	}
+	// return newFilledBatch
 	PendingBlockMap[b.Sn] = pendingBlock
-	logger.Debug().Msgf("%v microblocks are missing in id: %x", len(pendingBlock.MissingMap), b.Sn)
+	logger.Debug().Msgf("%v microblocks are missing in id: %d", len(pendingBlock.MissingMap), b.Sn)
 	for mbid, _ := range pendingBlock.MissingMap {
 		MissingMBs[mbid] = b.Sn
 		MissingMBList = append(MissingMBList, ToProtoIdentifier(mbid))
 		logger.Debug().Msgf("[%v] a microblock is missing, id: %x", membership.OwnID, mbid)
 	}
-	wg.Add(1)
 	// 发送Req请求召回missing entry
 	missingRequest := pb.MissingMBRequest{
 		RequesterId:   membership.OwnID,
@@ -84,7 +102,7 @@ func (b *Batch) FillBatch(proposerId int) *FilledBatch {
 			MissingMicroblockRequest: &missingRequest,
 		},
 	}
-	messenger.EnqueueMsg(msg, int32(proposerId))
+	messenger.EnqueueMsg(msg, int32(sn))
 	return nil
 }
 
@@ -144,45 +162,35 @@ func (b *Batch) CheckSignatures() error {
 // 利用负载装填一个batch结构并检查签名
 // 改动 我们在用pb.Batch的信息还原一个Batch 对于我们装填了MB的Batch来说，似乎验证MB本身 没有意义，因为还是MB的安全是由PAB保证的
 func NewBatch(msg *pb.Batch) *Batch {
-
-	logger.Debug().Int("nMB", len(msg.MbHashList)).Msg("Creating new Batch.")
-
 	newBatch := &Batch{
 		MBHashList: make([][]byte, len(msg.MbHashList), len(msg.MbHashList)),
 		SigMap:     make(map[util.Identifier]map[int32][]byte, len(msg.SigMap)),
 		BucketId:   -1,
+		Sn:         -1,
 	}
 
-	newBatch.MBHashList = msg.MbHashList
-	for key, value := range msg.SigMap {
-		newBatch.SigMap[util.BytesToIdentifier([]byte(key))] = value.MicroblockSigmap
+	for i, MBHash := range msg.MbHashList {
+		newBatch.MBHashList[i] = MBHash
+	}
+	for _, sigmap := range msg.SigMap {
+		newBatch.SigMap[FromProtoIdentifier(sigmap.Key)] = sigmap.Value.MicroblockSigmap
 	}
 	newBatch.BucketId = int(msg.BucketId)
-
-	// Check signatures of the requests in the new batch.
-	// if config.Config.SignRequests {
-	// 	if err := newBatch.CheckSignatures(); err != nil {
-	// 		logger.Fatal().Err(err).Msg("Invalid signature in new batch.")
-	// 		// TODO: Instead of crashing, just return nil.
-	// 		return nil
-	// 	}
-	// }
-
+	newBatch.Sn = int(msg.Sn)
+	// logger.Info().Msgf("A new batch with len: %d at bucket:%d",len(newBatch.MBHashList),newBatch.BucketId)
 	return newBatch
 }
-
-
 
 // 利用负载装填一个batch结构并检查签名
 // 改动 我们在用pb.Batch的信息还原一个Batch 对于我们装填了MB的Batch来说，似乎验证MB本身 没有意义，因为还是MB的安全是由PAB保证的
 func NewFilledBatch(msg *pb.FilledBatch) *FilledBatch {
 
-	logger.Debug().Int("nMB", len(msg.Requests)).Msg("Creating new Batch.")
+	// logger.Debug().Int("nMB", len(msg.Requests)).Msg("Creating new Batch.")
 
 	newBatch := &FilledBatch{
 		Requests: make([]*Request, 0),
 	}
-	for _, reqMsg := range msg.Requests{
+	for _, reqMsg := range msg.Requests {
 		req := &Request{
 			Msg:      reqMsg,
 			Digest:   Digest(reqMsg),
@@ -208,30 +216,54 @@ func NewFilledBatch(msg *pb.FilledBatch) *FilledBatch {
 	return newBatch
 }
 
-func (b *FilledBatch) Message() *pb.FilledBatch{
+func (b *FilledBatch) Message() *pb.FilledBatch {
 	newFilledBatchMsg := &pb.FilledBatch{
 		Requests: make([]*pb.ClientRequest, 0),
 	}
-	for _, req := range b.Requests{
+	for _, req := range b.Requests {
 		reqMsg := &pb.ClientRequest{
-				RequestId: req.Msg.RequestId,
-				Payload: req.Msg.Payload,
-				Pubkey:  req.Msg.Pubkey,
-				Signature: req.Msg.Signature,
-			}
+			RequestId: req.Msg.RequestId,
+			Payload:   req.Msg.Payload,
+			Pubkey:    req.Msg.Pubkey,
+			Signature: req.Msg.Signature,
+		}
 		newFilledBatchMsg.Requests = append(newFilledBatchMsg.Requests, reqMsg)
 	}
 	return newFilledBatchMsg
 
 }
+
+func isMsgUTF8Valid(msg *pb.Batch) bool {
+	// // 检查 MbHashList 中的字节切片
+	// for i, hash := range msg.MbHashList {
+	//     if !utf8.Valid(hash) {
+	//         logger.Info().Msgf("Invalid UTF-8 in MbHashList[%d]: %v\n", i, hash)
+	//         return false
+	//     }
+	// }
+
+	// // 检查 SigMap 中的键和值
+	// for key := range msg.SigMap {
+	//     if !utf8.ValidString(string(key)) {
+	//         logger.Info().Msgf("Invalid UTF-8 in SigMap key: %v\n", key)
+	//         return false
+	//     }
+	// }
+
+	// // 其他字段可以根据需要进行类似的检查
+
+	return true
+}
+
 // Returns a protobuf message containing this Batch.
 // 将Batch还原成ReqMsg
 func (b *Batch) Message() *pb.Batch {
 	// Create empty Batch message
 	msg := pb.Batch{
 		MbHashList: make([][]byte, len(b.MBHashList), len(b.MBHashList)),
-		SigMap:     make(map[string]*pb.MBSig),
+		SigMap:     make([]*pb.SigmapEntry, 0),
 		BucketId:   -1,
+		Sn:         -1,
 	}
 
 	// Populate Batch message with request messages
@@ -239,14 +271,15 @@ func (b *Batch) Message() *pb.Batch {
 		msg.MbHashList[i] = MBHash
 	}
 	msg.BucketId = int32(b.BucketId)
+	msg.Sn = int32(b.Sn)
 	for key, value := range b.SigMap {
-		pbValue := pb.MBSig{
-			MicroblockSigmap: value,
-		}
-		msg.SigMap[string(util.IdentifierToBytes(key))] = &pbValue
+		msg.SigMap = append(msg.SigMap, &pb.SigmapEntry{Key: ToProtoIdentifier(key), Value: &pb.MBSig{MicroblockSigmap: value}})
 	}
 
 	// Return final Batch message
+	// if !isMsgUTF8Valid(&msg) {
+	// 	logger.Info().Msgf("Containing unvalid msg")
+	// }
 	return &msg
 }
 

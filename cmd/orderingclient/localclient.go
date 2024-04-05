@@ -6,18 +6,18 @@ import (
 	"sync"
 	"time"
 
-	"github.com/rs/zerolog"
-	logger "github.com/rs/zerolog/log"
 	"github.com/hyperledger-labs/mirbft/config"
 	pb "github.com/hyperledger-labs/mirbft/protobufs"
 	"github.com/hyperledger-labs/mirbft/tracing"
+	"github.com/rs/zerolog"
+	logger "github.com/rs/zerolog/log"
 )
 
 type LocalClient struct {
 	ownClientID int32
 
 	// Number of requests the client tries to submit before stopping.
-	numRequests int
+	numMBs int
 
 	// For each request, stores a flag indicating whether the request is finished.
 	finished map[int32]bool
@@ -45,11 +45,11 @@ type LocalClient struct {
 }
 
 // Allocates and returns a pointer to a new client.
-func NewLocalClient(numRequests int) *LocalClient {
+func NewLocalClient(numMBs int) *LocalClient {
 	return &LocalClient{
 		ownClientID:    -1,
-		numRequests:    numRequests,
-		finished:       make(map[int32]bool, numRequests),
+		numMBs:         numMBs,
+		finished:       make(map[int32]bool, numMBs),
 		oldestClientSN: 0,
 		inFlight:       make(chan *pb.ClientRequest, config.Config.ClientWatermarkWindowSize),
 		trace: &tracing.BufferedTrace{
@@ -92,7 +92,7 @@ func (c *LocalClient) Run(handlerFunc func(msg *pb.ClientRequest), wg *sync.Wait
 	c.log.Info().Msg("Starting to submit requests.")
 
 	// Submit requests
-	for i := int32(0); i < int32(c.numRequests); i++ {
+	for i := int32(0); i < int32(c.numMBs); i++ {
 
 		// blocks while watermark window is full
 		c.submitRequest(i)
@@ -102,7 +102,7 @@ func (c *LocalClient) Run(handlerFunc func(msg *pb.ClientRequest), wg *sync.Wait
 		time.Sleep(time.Microsecond * 1000000 / time.Duration(config.Config.RequestRate))
 	}
 
-	c.log.Info().Int("nReq", c.numRequests).Msg("All requests submitted.")
+	c.log.Info().Int("nReq", c.numMBs).Msg("All requests submitted.")
 }
 
 // Submits a single client request with sequence number seqNr.

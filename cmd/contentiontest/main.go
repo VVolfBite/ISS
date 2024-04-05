@@ -9,17 +9,17 @@ import (
 	"sync/atomic"
 	"time"
 
-	"github.com/rs/zerolog"
 	"github.com/hyperledger-labs/mirbft/profiling"
+	"github.com/rs/zerolog"
 
 	"net"
 	"os"
 	"strconv"
 
-	logger "github.com/rs/zerolog/log"
 	"github.com/hyperledger-labs/mirbft/config"
 	"github.com/hyperledger-labs/mirbft/messenger"
 	pb "github.com/hyperledger-labs/mirbft/protobufs"
+	logger "github.com/rs/zerolog/log"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
 )
@@ -347,7 +347,7 @@ func (ts *contentionTest0Server) TestContention0(srv pb.ContentionTest0_TestCont
 
 	logger.Info().
 		Int32("running", atomic.LoadInt32(&running)).
-		Int("numRequests", received).
+		Int("numMBs", received).
 		Int("channel", 0).
 		Int64("duration", duration).
 		Int("rate", rate).
@@ -408,7 +408,7 @@ func (ts *contentionTest1Server) TestContention1(srv pb.ContentionTest1_TestCont
 
 	logger.Info().
 		Int32("running", atomic.LoadInt32(&running)).
-		Int("numRequests", received).
+		Int("numMBs", received).
 		Int("channel", 1).
 		Int64("duration", duration).
 		Int("rate", rate).
@@ -530,7 +530,7 @@ func runClient(clID int, serverAddr string, channel int, wg *sync.WaitGroup) {
 	mbps := float64(payloadSize*requestsSent*8) / float64(endTime-startTime) // In mbps
 	clientLog.Info().
 		Int("payloadSize", payloadSize).
-		Int("numRequests", requestsSent).
+		Int("numMBs", requestsSent).
 		Int64("duration", duration).
 		Float64("mbps", mbps).
 		Msg("Done sending requests.")
