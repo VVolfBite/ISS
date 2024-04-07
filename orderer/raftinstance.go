@@ -845,14 +845,15 @@ func (ri *raftInstance) maybeAnnounce() {
 		Int("segment", ri.segment.SegID()).
 		Int32("index", index).
 		Msg("Announcement.")
-
+	var fillSn = ri.log[index].sn
 	// Remove batch requests
 	go func() {
 		for {
-			filledBatch := ri.log[index].batch.FillBatch(int(ri.log[index].sn)).Message()
+			filledBatch := ri.log[index].batch.FillBatch(int(fillSn))
 			if filledBatch != nil {
-				request.RemoveBatch(request.NewFilledBatch(filledBatch))
-				announcer.Announce(&log.Entry{Sn: ri.log[index].sn, Batch: filledBatch})
+				filledBatchMsg := filledBatch.Message()
+				request.RemoveBatch(request.NewFilledBatch(filledBatchMsg))
+				announcer.Announce(&log.Entry{Sn: ri.log[index].sn, Batch: filledBatchMsg})
 				break // 如果成功调用了 announce，则退出循环
 			}
 			time.Sleep(time.Second) // 每次重试之间等待一段时间，避免过于频繁的重试

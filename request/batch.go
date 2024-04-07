@@ -16,6 +16,9 @@ package request
 
 import (
 	"fmt"
+	"math/rand"
+	"time"
+
 	// "github.com/hyperledger-labs/mirbft/config"
 	"github.com/hyperledger-labs/mirbft/crypto"
 	"github.com/hyperledger-labs/mirbft/membership"
@@ -41,53 +44,45 @@ type FilledBatch struct {
 
 // fillBatch 会对Batch进行填充，调用者需要自己开启线程保证不要阻塞
 func (b *Batch) FillBatch(sn int) *FilledBatch {
-	// logger.Info().Msgf("We are dealing proposal %d",sn)
-	// logger.Info().Msgf("Its a batch with %d",len(b.MBHashList))
-	// for i,mbhash := range b.MBHashList{
-	// 	logger.Info().Msgf("%d : %x",i,mbhash)
-	// 	if Buckets[b.BucketId].Mempool.microblockMap[util.BytesToIdentifier(mbhash)] != nil{
-	// 		logger.Info().Msgf("This mb has backup in the pool")
-	// 	}
-	// }
-
-	// return &FilledBatch{
-	// 	Requests: make([]*Request, 0),
-	// }
-
+	mu.Lock()
 	newFilledBatch := &FilledBatch{
 		Requests: make([]*Request, 0),
 	}
-
 	if len(b.MBHashList) == 0 {
+		mu.Unlock()
 		return newFilledBatch
+	}	
+
+	bucketID := b.BucketId	
+	var pendingBlock *PendingBlock
+	pendingBlock, exits := PendingBlockMap[b.Sn]
+	if !exits{
+		pendingBlock = Buckets[bucketID].Mempool.FillProposal(b.MBHashList)
+	} else{
+		logger.Info().Msgf("We got a remaining pd with %d to go at sn:%d ",len(pendingBlock.MissingMap),sn)
+		for mbhash,_ := range pendingBlock.MissingMap{
+			logger.Info().Msgf("Misssing %x",mbhash)
+		}
 	}
 
-	// 初始化 BucketMBHashList 的 map
-	bucketID := b.BucketId
-	var MissingMBList []*pb.Identifier
-	pendingBlock := Buckets[bucketID].Mempool.FillProposal(b.MBHashList)
-
-	// logger.Info().Msgf("Pending block sn:%d with mb: %d and missing:%d", b.Sn, len(pendingBlock.MBHashList), len(pendingBlock.MissingMap))
-	// logger.Info().Msgf("Pending block is from bucket %d", b.BucketId)
-
-	
-
 	block := pendingBlock.CompleteBlock()
-	
 	if block != nil {
-		logger.Info().Msgf("[%v] a block is ready, id: %d", membership.OwnID, b.Sn)
+		// logger.Info().Msgf("[%v] a block is ready, id: %d", membership.OwnID, b.Sn)
 		for _, mb := range block.Payload.MicroblockList {
 			newFilledBatch.Requests = append(newFilledBatch.Requests, mb.Txns...)
 		}
+		mu.Unlock()
 		return newFilledBatch
 	}
-	// return newFilledBatch
+
+	var MissingMBList []*pb.Identifier
+
 	PendingBlockMap[b.Sn] = pendingBlock
 	logger.Debug().Msgf("%v microblocks are missing in id: %d", len(pendingBlock.MissingMap), b.Sn)
 	for mbid, _ := range pendingBlock.MissingMap {
 		MissingMBs[mbid] = b.Sn
 		MissingMBList = append(MissingMBList, ToProtoIdentifier(mbid))
-		logger.Debug().Msgf("[%v] a microblock is missing, id: %x", membership.OwnID, mbid)
+		logger.Info().Msgf("[%v] a mb is missing, hash: %x sn:%d and record as missing mbs at %d", membership.OwnID, mbid,b.Sn,b.Sn)
 	}
 	// 发送Req请求召回missing entry
 	missingRequest := pb.MissingMBRequest{
@@ -102,7 +97,20 @@ func (b *Batch) FillBatch(sn int) *FilledBatch {
 			MissingMicroblockRequest: &missingRequest,
 		},
 	}
-	messenger.EnqueueMsg(msg, int32(sn))
+	rand.Seed(time.Now().UnixNano())
+	nodes := membership.AllNodeIDs()
+	randomIndex := rand.Intn(len(nodes))
+	randomElement := nodes[randomIndex]
+	
+	// 确保选中的随机元素不是 membership.OwnID
+	for randomElement == membership.OwnID {
+		randomIndex = rand.Intn(len(nodes))
+		randomElement = nodes[randomIndex]
+	}
+	
+	messenger.EnqueueMsg(msg, randomElement)
+	mu.Unlock()
+	time.Sleep(time.Second * 10)
 	return nil
 }
 

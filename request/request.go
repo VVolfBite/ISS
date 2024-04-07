@@ -61,8 +61,9 @@ var (
 	MissingCounts   map[int32]int
 	MissingMBs      map[util.Identifier]int        // 缺失的mb，即所有 pending block的快速映射
 	ReceivedMBs     map[util.Identifier]struct{}                 // 收到的mb
-	RMBmu			sync.Mutex									// 保护线程安全所需要的锁
 	PendingBlockMap map[int]*PendingBlock // pending block 是对fill proposal后仍有mb没有获取需要retrive的的block的称呼
+	mu			sync.Mutex									// 保护线程安全所需要的锁
+	
 	
 )
 

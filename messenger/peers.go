@@ -30,8 +30,8 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/grpc/peer"
 
-	logger "github.com/rs/zerolog/log"
 	pb "github.com/hyperledger-labs/mirbft/protobufs"
+	logger "github.com/rs/zerolog/log"
 )
 
 // TODO: Move relevant constants to some config file
@@ -54,7 +54,7 @@ var CheckpointMsgHandler func(msg *pb.CheckpointMsg, senderID int32)
 var StateTransferMsgHandler func(msg *pb.ProtocolMessage)
 var OrdererMsgHandler func(msg *pb.ProtocolMessage)
 var PABMsgHandler func(msg *pb.ProtocolMessage)
-
+var mu sync.Mutex
 type connectionTest struct {
 	MsgSink         pb.Messenger_ListenClient
 	DataTransmitted int // Number of bytes transmitted
@@ -271,12 +271,20 @@ func Connect() {
 // also must not be called concurrently with EnqueuePriorityMessage with the same destNodeID.
 // 向节点destodeId发送信息msg，显然是节点最外层的发送信息方法
 func EnqueueMsg(msg *pb.ProtocolMessage, destNodeID int32) {
-
+	mu.Lock()
+	defer mu.Unlock()
 	// WARNING: If a simulate crash, the peer ignores all messages
 	if Crashed {
 		return
 	}
-	// 用 -1 作为广播识别方案
+	switch m := msg.Msg.(type) {
+	
+	case *pb.ProtocolMessage_MissingMicroblockRequest:
+		preprepare := m.MissingMicroblockRequest
+		logger.Info().Int32("SenderId", msg.SenderId).Int32("Sn", msg.Sn).Interface("MissingMicroblockRequest", preprepare).Msg("PBFT MissingMicroblockRequest message")
+	default:
+	}
+
 	if peerConnections[destNodeID] == nil {
 		logger.Error().Int32("nodeID", destNodeID).Msg("Cannot enqueue message. Node not connected.")
 	} else {
@@ -293,24 +301,24 @@ func EnqueueMsg(msg *pb.ProtocolMessage, destNodeID int32) {
 // also must not be called concurrently with EnqueueMessage with the same destNodeID.
 // 向节点destodeId发送存在优先级的信息
 func EnqueuePriorityMsg(msg *pb.ProtocolMessage, destNodeID int32) {
-	
+	mu.Lock()
+	defer mu.Unlock()
 	// WARNING: If a simulate crash, the peer ignores all messages
 	if Crashed {
 		return
+	}
+	switch m := msg.Msg.(type) {
+	
+	case *pb.ProtocolMessage_MissingMicroblockRequest:
+		preprepare := m.MissingMicroblockRequest
+		logger.Info().Int32("SenderId", msg.SenderId).Int32("Sn", msg.Sn).Interface("MissingMicroblockRequest", preprepare).Msg("PBFT MissingMicroblockRequest message")
+	default:
+		
 	}
 
 	if peerConnections[destNodeID] == nil {
 		logger.Error().Int32("nodeID", destNodeID).Msg("Cannot enqueue message. Node not connected.")
 	} else {
-		// switch m := msg.Msg.(type) {
-		
-		// case *pb.ProtocolMessage_Preprepare:
-		// 	preprepare := m.Preprepare
-		// 	logger.Info().Int32("SenderId", msg.SenderId).Int32("Sn", msg.Sn).Interface("Preprepare", preprepare).Msg("PBFT Preprepare message")
-		// default:
-		// 	logger.Info().Msg("Unknown message type")
-		// }
-
 		peerConnections[destNodeID].SendPriority(msg)
 	}
 }

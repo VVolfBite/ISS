@@ -22,6 +22,7 @@
         "Initialise",
         "kelindar",
         "loadbalance",
+        "mbhash",
         "mbid",
         "meaans",
         "memsize",

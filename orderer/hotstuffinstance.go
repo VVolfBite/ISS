@@ -395,9 +395,10 @@ func (hi *hotStuffInstance) handleProposal(proposal *pb.HotStuffProposal, msg *p
 
 	decided := new.parent.parent.parent
 	if !decided.announced {
+		var fillSn =  decided.batch.Sn
 		go func() {
 			for {
-				filledBatch := decided.batch.FillBatch(decided.batch.Sn)
+				filledBatch := decided.batch.FillBatch(fillSn)
 				if filledBatch != nil {
 					hi.announce(decided, hi.height2sn[decided.height], filledBatch.Message(), decided.digest, decided.node.Aborted)
 					break // 如果成功调用了 announce，则退出循环

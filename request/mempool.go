@@ -67,6 +67,7 @@ func (pool *MemPool) AutoClear() {
 			
 		}
 		pool.Reqmu.Unlock()
+		time.Sleep(time.Second * 3) // 睡眠1秒钟
 	}
 }
 
@@ -93,7 +94,7 @@ func NewMemPool(BucketId int) *MemPool {
 		lastReqTime:        time.Now(),
 		autoClearThreshold: 10000000000,
 	}
-	// go mempool.AutoClear()
+	go mempool.AutoClear()
 	return mempool
 }
 
@@ -149,7 +150,7 @@ func (pool *MemPool) AddReq(txn *Request) (bool, *MicroBlock) {
 		// logger.Info().Msgf("Generating a block %x by %d",newBlock.Hash,newBlock.Sender)
 		return true, newBlock
 
-	} else if (totalSize == pool.msize || txn.Msg.RequestId.ClientSn >= 3700){
+	} else if totalSize == pool.msize {
 		//add the curr trans, and generate a microBlock
 		var id int
 		allTxn := append(pool.makeTxnSlice(), txn)

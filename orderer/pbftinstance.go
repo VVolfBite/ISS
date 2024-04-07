@@ -420,11 +420,12 @@ func (pi *pbftInstance) handlePreprepare(preprepare *pb.PbftPreprepare, msg *pb.
 		}
 		// Mark batch as committed.
 		batch.committed = true
+		var fillSn = batch.batch.Sn
 		go func() {
 			var filledBatch *request.FilledBatch // 声明变量
 			// logger.Info().Msgf("About to fill batch from sender %d at %d", preprepare.GetLeader(),membership.OwnID)
 			for {
-				filledBatch = batch.batch.FillBatch(batch.batch.Sn) // 更新变量值
+				filledBatch = batch.batch.FillBatch(fillSn) // 更新变量值
 				if filledBatch == nil {
 					time.Sleep(time.Second)
 					continue // 使用 continue 替换 break
@@ -536,12 +537,13 @@ func (pi *pbftInstance) handlePrepare(prepare *pb.PbftPrepare, msg *pb.ProtocolM
 		//	logger.Warn().Int32("sn", sn).Int("segID", pi.segment.SegID()).Int32("ownID", membership.OwnID).Msg("DEBUG: not committing!")
 		//	return nil
 		//}
+		var fillSn = sn
 		go func() {
 			// logger.Info().Msgf("About to fill batch at %d",membership.OwnID)
 			var filledBatch *request.FilledBatch
 			for {
 				newBatch := request.NewBatch(batch.preprepareMsg.Batch)
-				filledBatch = newBatch.FillBatch(int(sn))
+				filledBatch = newBatch.FillBatch(int(fillSn))
 				if filledBatch == nil {
 					time.Sleep(time.Second)
 					continue
@@ -651,12 +653,13 @@ func (pi *pbftInstance) handleCommit(commit *pb.PbftCommit, msg *pb.ProtocolMess
 		//	logger.Warn().Int32("sn", sn).Int("segID", pi.segment.SegID()).Int32("ownID", membership.OwnID).Msg("DEBUG: not committing!")
 		//	return nil
 		//}
+		var fillSn = batch.preprepareMsg.Batch.Sn
 		go func() {
 			// logger.Info().Msgf("About to fill batch at %d",membership.OwnID)
 			var filledBatch *request.FilledBatch
 			for {
 				newBatch := request.NewBatch(batch.preprepareMsg.Batch)
-				filledBatch = newBatch.FillBatch(newBatch.Sn)
+				filledBatch = newBatch.FillBatch(int(fillSn))
 				if filledBatch == nil {
 					time.Sleep(time.Second)
 					continue

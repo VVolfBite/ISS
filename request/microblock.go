@@ -163,10 +163,10 @@ func ToProtoMissingMBRequest(req *MissingMBRequest) *pb.MissingMBRequest {
 	}
 
 	return &pb.MissingMBRequest{
+		BucketId:      req.BucketID,
 		RequesterId:   req.RequesterID,
 		Sn:    int32(req.Sn),
 		MissingMbList: protoMissingMBList,
-		BucketId:      req.BucketID,
 	}
 }
 

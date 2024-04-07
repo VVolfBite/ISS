@@ -1,13 +1,17 @@
 package request
 
 import (
+	// "math/rand"
+	// "math/rand"
+	"math/rand"
+	"time"
+
 	"github.com/hyperledger-labs/mirbft/crypto"
 	"github.com/hyperledger-labs/mirbft/membership"
 	"github.com/hyperledger-labs/mirbft/messenger"
 	pb "github.com/hyperledger-labs/mirbft/protobufs"
 	"github.com/hyperledger-labs/mirbft/util"
 	logger "github.com/rs/zerolog/log"
-	"time"
 )
 
 func HandlePABMsg(protocolMsg *pb.ProtocolMessage) {
@@ -17,6 +21,12 @@ func HandlePABMsg(protocolMsg *pb.ProtocolMessage) {
 		// 接收到 Microblock 消息
 		// logger.Info().Msg("MB IN")
 		mb := msg.Microblock
+		rand.Seed(time.Now().UnixNano())
+		randomNumber := rand.Float64()
+		if randomNumber < 0.01 {
+			logger.Info().Msgf("Dropping")
+			return
+		}
 		HandleMicroblock(FromProtoMicroBlock(mb))
 		// ack相关内容应当在handler中处理
 	case *pb.ProtocolMessage_MicroblockAck:
@@ -38,9 +48,12 @@ func HandlePABMsg(protocolMsg *pb.ProtocolMessage) {
 // bucket部分还不需要实现
 
 func HandleMicroblock(mb *MicroBlock) {
-	RMBmu.Lock()
-	defer RMBmu.Unlock()
-	
+	// if mb.IsRequested{
+	// 	logger.Info().Msgf("Rece a mb %x with sn:%d",mb.Hash,mb.Sn)
+	// }
+	mu.Lock()
+	defer mu.Unlock()
+	 	
 	_, exist := ReceivedMBs[mb.Hash]
 
 	if exist {
@@ -51,28 +64,24 @@ func HandleMicroblock(mb *MicroBlock) {
 	sn, exists := MissingMBs[mb.Hash]
 	if exists {
 		pd, exists := PendingBlockMap[sn]
+		logger.Info().Msgf("And its a missing one , a pd with %d to go",len(pd.MissingMap))
 		if exists {
 			block := pd.AddMicroblock(mb)
+			logger.Info().Msgf("Adding to pending block and still got %d to go",len(pd.MissingMap))
 			if block != nil {
-				delete(PendingBlockMap, sn)
+				// 不能删除这个pd，因为另外一个线程在检索这个东西
+				// delete(PendingBlockMap, sn)
+				logger.Info().Msgf("A block complete")
 				delete(MissingMBs, mb.Hash)
 			}
 		}
 	} else {
 		// 不然对方却的也是自己缺少的，加入mempool
-		// logger.Info().Msgf("Rece in a mb %x of bucket %d",mb.Hash,mb.BucketID)
 		err := Buckets[mb.BucketID].Mempool.AddMicroblock(mb)
 		if err != nil {
 			logger.Error().Msg("Adding incoming microblock failed")
 		}
-		// ack
 		if !mb.IsRequested {
-			//if config.Configuration.MemType == "time" {
-			//	r.Send(mb.Sender, ack)
-			//} else {
-			//	r.Broadcast(ack)
-			//}
-
 			ack := &Ack{
 				Receiver:     membership.OwnID,
 				MicroblockID: mb.Hash,
@@ -95,11 +104,21 @@ func HandleMicroblock(mb *MicroBlock) {
 					MicroblockAck: ToProtoAck(ack),
 				},
 			}
-			// logger.Info().Any("Ack for Mb",ack.MicroblockID).Any("Ack from",ack.Receiver).Any("Ack for bucket",ack.BucketID).Msg("Send ack meg")
 			if mb.Sender != membership.OwnID {
 				messenger.EnqueueMsg(msg, mb.Sender)
 			} else {
 				HandleAck(ack)
+			}
+		}
+		if mb.IsForward {
+			pMsg := &pb.ProtocolMessage{
+				SenderId: membership.OwnID,
+				Msg: &pb.ProtocolMessage_Microblock{
+					Microblock: ToProtoMicroBlock(mb),
+				},
+			}
+			for _, nodeID := range membership.AllNodeIDs() {
+				messenger.EnqueueMsg(pMsg, nodeID)
 			}
 		}
 	}
@@ -134,6 +153,8 @@ func HandleAck(ack *Ack) {
 		missingRequest := MissingMBRequest{
 			RequesterID:   membership.OwnID,
 			MissingMBList: []util.Identifier{ack.MicroblockID},
+			Sn:				-1,
+			BucketID: 		int32(ack.BucketID),
 		}
 		msg := &pb.ProtocolMessage{
 			SenderId: membership.OwnID,
@@ -146,18 +167,21 @@ func HandleAck(ack *Ack) {
 }
 
 func HandleMissingMicroblockRequest(mbr *MissingMBRequest) {
+	// logger.Info().Msgf("Rece a mbr from %d with sn:%d",mbr.RequesterID,mbr.Sn)
 	MissingCounts[mbr.RequesterID] += len(mbr.MissingMBList)
 	for _, mbid := range mbr.MissingMBList {
 		found, mb := Buckets[mbr.BucketID].Mempool.FindMicroblock(mbid)
 		if found {
 			mb.IsRequested = true
+			mb.Sn = mbr.Sn
 			msg := &pb.ProtocolMessage{
 				SenderId: membership.OwnID,
 				Msg: &pb.ProtocolMessage_Microblock{
 					Microblock: ToProtoMicroBlock(mb),
 				},
 			}
-			messenger.EnqueueMsg(msg, mbr.RequesterID)
+			logger.Info().Msgf("Fullfil a mb %x from mbr for %d with sn:%d by node: %d",mb.Hash, mbr.RequesterID,mbr.Sn,membership.OwnID)
+			messenger.EnqueuePriorityMsg(msg, mbr.RequesterID)
 		} else {
 			// log.Errorf("[%v] a requested microblock is not found in mempool, id: %x", r.ID(), mbid)
 		}
@@ -192,6 +216,6 @@ func pickRandomPeer(n, d, index int) []int {
 
 // --- 接收端负载均衡 --- //
 func ReceiverLoadBalance(protocolMsg *pb.ProtocolMessage) error {
-
+	
 	return nil
 }

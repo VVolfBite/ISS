@@ -92,12 +92,7 @@ func NewBucketGroup(bucketIDs []int) *BucketGroup {
 // On timeout, returns a batch with all requests in the Buckets, even if all the Buckets are empty.
 // 从组的桶剪出一个Batch
 func (bg *BucketGroup) CutBatch(size int, timeout time.Duration, sn int32) *Batch {
-	// return &Batch{
-	// 	MBHashList: make([][]byte, 0),
-	// 	SigMap:     make(map[util.Identifier]map[int32][]byte),
-	// 	BucketId:   -1,
-	// 	Sn:         int(sn),
-	// }
+	
 	alreadyWaited := bg.waitMinimum()
 	bg.lockBuckets()
 	defer bg.unlockBuckets()
@@ -130,11 +125,13 @@ func (bg *BucketGroup) CutBatch(size int, timeout time.Duration, sn int32) *Batc
 	var maxIndex = 0
 
 	for index, bucket := range bg.buckets {
-		// logger.Info().Msgf("Index:%d ,and Num:%d and BucketId:%d",index,bucket.Mempool.stableMicroblocks.Len(),bucket.id)
+		bucket.Mempool.MBmu.Lock()
+		
 		if bucket.Mempool.stableMicroblocks.Len() >= maxNum {
 			maxNum = bucket.Mempool.stableMicroblocks.Len()
 			maxIndex = index
 		}
+		bucket.Mempool.MBmu.Unlock()
 	}
 
 	if size <= maxNum {
@@ -192,10 +189,10 @@ func (bg *BucketGroup) waitForStableMicroBlockLocked(numMicroblock int, timeout 
 
 	// Count all requests in all buckets in the group.
 	// (A normal assignment suffices, as all buckets are locked.)
-	bg.totalStableMicroBlock = int32(bg.CountStableMicroBlock())
+	// bg.totalStableMicroBlock = int32(bg.CountStableMicroBlock())
 
 	// If there are enough requests in the bucket, return immediately.
-	if int(bg.totalStableMicroBlock) >= numMicroblock || (timeout == 0) {
+	if (timeout == 0) {
 		return
 	}
 

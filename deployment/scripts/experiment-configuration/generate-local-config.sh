@@ -34,7 +34,7 @@
 # NOTE: this section is not meaningful for the local deployment, but the scripts try to read those parameters so it has to be here.
 machineType="cloud-machine-templates/small-machine"
 machineLocations="fra05"
-faultyMachineLocations="sjc04 osa23 ams03 syd05 lon06 wdc07 che01 tok05 par01 dal10 fra05 mil01 mex01 tor01 tor04 seo01"
+faultyMachineLocations="fra05"
 
 # number of client instances per node for 1/16/32 client machines
 clients1="1"    # deploys 1 client machine which run the specified number of client instances
@@ -139,7 +139,7 @@ throughputsNoAuthSinglePbft[64]=""
 throughputsNoAuthSinglePbft[128]=""
 
 throughputsAuthHotStuff=$()
-throughputsAuthHotStuff[4]=""
+throughputsAuthHotStuff[4]="128 256"
 throughputsAuthHotStuff[8]=""
 throughputsAuthHotStuff[16]=""
 throughputsAuthHotStuff[32]=""
@@ -153,7 +153,7 @@ throughputsNoAuthHotStuff[32]=""
 throughputsNoAuthHotStuff[64]=""
 throughputsNoAuthHotStuff[128]=""
 throughputsAuthSingleHotStuff=$()
-throughputsAuthSingleHotStuff[4]=""
+throughputsAuthSingleHotStuff[4]="128 256"
 throughputsAuthSingleHotStuff[8]=""
 throughputsAuthSingleHotStuff[16]=""
 throughputsAuthSingleHotStuff[32]=""
@@ -168,7 +168,7 @@ throughputsNoAuthSingleHotStuff[64]=""
 throughputsNoAuthSingleHotStuff[128]=""
 
 throughputsAuthRaft=$()
-throughputsAuthRaft[4]=""
+throughputsAuthRaft[4]="128 256"
 throughputsAuthRaft[8]=""
 throughputsAuthRaft[16]=""
 throughputsAuthRaft[32]=""
@@ -182,7 +182,7 @@ throughputsNoAuthRaft[32]=""
 throughputsNoAuthRaft[64]=""
 throughputsNoAuthRaft[128]=""
 throughputsAuthSingleRaft=$()
-throughputsAuthSingleRaft[4]=""
+throughputsAuthSingleRaft[4]="128 256"
 throughputsAuthSingleRaft[8]=""
 throughputsAuthSingleRaft[16]=""
 throughputsAuthSingleRaft[32]=""
