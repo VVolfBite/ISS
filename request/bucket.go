@@ -97,7 +97,6 @@ func (b *Bucket) Len() int {
 func (b *Bucket) AddRequest(req *Request) (*Request, bool) {
 	b.Lock()
 	defer b.Unlock()
-
 	return b.addNoLock(req)
 }
 

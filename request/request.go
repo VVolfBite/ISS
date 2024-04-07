@@ -16,7 +16,9 @@ package request
 
 import (
 	"encoding/binary"
+	"math/rand"
 	"sync"
+	"time"
 
 	"github.com/hyperledger-labs/mirbft/config"
 	"github.com/hyperledger-labs/mirbft/crypto"
@@ -59,12 +61,12 @@ var (
 	batchVerifierFunc func(*Batch) bool
 
 	MissingCounts   map[int32]int
-	MissingMBs      map[util.Identifier]int        // 缺失的mb，即所有 pending block的快速映射
-	ReceivedMBs     map[util.Identifier]struct{}                 // 收到的mb
-	PendingBlockMap map[int]*PendingBlock // pending block 是对fill proposal后仍有mb没有获取需要retrive的的block的称呼
-	mu			sync.Mutex									// 保护线程安全所需要的锁
-	
-	
+	MissingMBs      map[util.Identifier]int      // 缺失的mb，即所有 pending block的快速映射
+	ReceivedMBs     map[util.Identifier]struct{} // 收到的mb
+	PendingBlockMap map[int]*PendingBlock        // pending block 是对fill proposal后仍有mb没有获取需要retrive的的block的称呼
+	IsBusy          bool                         // 用于负载均衡的检测
+	mu              sync.Mutex                   // 保护线程安全所需要的锁
+
 )
 
 type watermarkRange struct {
@@ -80,7 +82,7 @@ func Init() {
 	MissingCounts = make(map[int32]int)
 	MissingMBs = make(map[util.Identifier]int)
 	ReceivedMBs = make(map[util.Identifier]struct{})
-	PendingBlockMap =make(map[int]*PendingBlock)
+	PendingBlockMap = make(map[int]*PendingBlock)
 
 	// Initializes the Buckets.
 	Buckets = make([]*Bucket, config.Config.NumBuckets)
@@ -185,7 +187,7 @@ type Request struct {
 
 // Allocates a new Request object from a client request message and adds it by calling Add().
 func AddReqMsg(reqMsg *pb.ClientRequest) *Request {
-	
+
 	return Add(&Request{
 		Msg:      reqMsg,
 		Digest:   Digest(reqMsg),
@@ -212,6 +214,14 @@ func Add(req *Request) *Request {
 	if !req.Buffer.Add(req) {
 		return nil
 	}
+	// 我们在这里模拟忙状态
+	if !IsBusy {
+		rand.Seed(time.Now().UnixNano())
+		randomNumber := rand.Intn(100)
+		IsBusy = randomNumber < 2
+		logger.Info().Msgf("Setting is busy to %t", IsBusy)
+	}
+	
 
 	// If Request is within the client watermark window, try looking it up in its bucket.
 	// If an identical request has already been stored in the bucket, return that request.
@@ -237,7 +247,7 @@ func Add(req *Request) *Request {
 
 		// Add verified request.
 		// If request cannot be added this time, it is not because of an unverified signature.
-		
+
 		storedReq, _ = req.Bucket.AddRequest(req)
 	}
 

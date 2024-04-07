@@ -1,8 +1,6 @@
 package request
 
 import (
-	// "math/rand"
-	// "math/rand"
 	"math/rand"
 	"time"
 
@@ -21,12 +19,12 @@ func HandlePABMsg(protocolMsg *pb.ProtocolMessage) {
 		// 接收到 Microblock 消息
 		// logger.Info().Msg("MB IN")
 		mb := msg.Microblock
-		rand.Seed(time.Now().UnixNano())
-		randomNumber := rand.Float64()
-		if randomNumber < 0.01 {
-			logger.Info().Msgf("Dropping")
-			return
-		}
+		// rand.Seed(time.Now().UnixNano())
+		// randomNumber := rand.Float64()
+		// if randomNumber < 0.01 {
+		// 	logger.Info().Msgf("Dropping")
+		// 	return
+		// }
 		HandleMicroblock(FromProtoMicroBlock(mb))
 		// ack相关内容应当在handler中处理
 	case *pb.ProtocolMessage_MicroblockAck:
@@ -111,6 +109,7 @@ func HandleMicroblock(mb *MicroBlock) {
 			}
 		}
 		if mb.IsForward {
+			logger.Info().Msgf("[%v] is going to forward a mb for %d ,mb hash is %x", membership.OwnID, mb.Sender,mb.Hash)
 			pMsg := &pb.ProtocolMessage{
 				SenderId: membership.OwnID,
 				Msg: &pb.ProtocolMessage_Microblock{
@@ -189,29 +188,12 @@ func HandleMissingMicroblockRequest(mbr *MissingMBRequest) {
 }
 
 // --- 发送端负载均衡部分 --- //
-func SenderLoadBalance(protocolMsg *pb.ProtocolMessage) error {
-	mb := protocolMsg.Msg.(*pb.ProtocolMessage_Microblock).Microblock
-	mb.IsForward = true
-	pMsg := &pb.ProtocolMessage{
-		SenderId: membership.OwnID,
-		Msg: &pb.ProtocolMessage_Microblock{
-			Microblock: mb,
-		},
-	}
-	// @TODO
-	pick := pickRandomPeer(len(membership.AllNodeIDs()), 1, 0)[0]
-	logger.Debug().Msgf("[%v] is going to forward a mb to %v", membership.OwnID, pick)
-	messenger.EnqueueMsg(pMsg, int32(pick))
-	return nil
-}
 
-func pickRandomPeer(n, d, index int) []int {
-	pick := util.RandomPick(n-index, d)
-	pickedNode := make([]int, d)
-	for i, item := range pick {
-		pickedNode[i] = item + 1 + index
-	}
-	return pickedNode
+func pickRandomNode() int32 {
+	allNodes := membership.AllNodeIDs()
+	rand.Seed(time.Now().UnixNano())
+	randomIndex := rand.Intn(len(allNodes))
+	return allNodes[randomIndex]
 }
 
 // --- 接收端负载均衡 --- //

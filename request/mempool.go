@@ -27,20 +27,20 @@ type MemPool struct {
 	currSize           int
 	threshhold         int // number of acks needed for a stable microblock
 	totalTx            int64
-	MBmu                 sync.Mutex
-	Reqmu                 sync.Mutex
+	MBmu               sync.Mutex
+	Reqmu              sync.Mutex
 	lastReqTime        time.Time
 	autoClearThreshold time.Duration
 }
 
 func (pool *MemPool) AutoClear() {
 	// 计算当前时间与上次添加请求时间的间隔
-	for {			
+	for {
 		pool.Reqmu.Lock()
 		duration := time.Since(pool.lastReqTime)
 		// 如果间隔超过自动清理阈值，则执行清理操作
 		if duration > pool.autoClearThreshold && pool.currSize > 0 {
-			logger.Info().Msgf("Duration: %d",duration.Nanoseconds())
+			logger.Info().Msgf("Duration: %d", duration.Nanoseconds())
 			logger.Info().Msg("Auto clear triggered.")
 
 			// 创建一个新的微块
@@ -64,7 +64,7 @@ func (pool *MemPool) AutoClear() {
 				messenger.EnqueueMsg(pMsg, nodeID)
 			}
 			pool.lastReqTime = time.Now()
-			
+
 		}
 		pool.Reqmu.Unlock()
 		time.Sleep(time.Second * 3) // 睡眠1秒钟
@@ -138,14 +138,29 @@ func (pool *MemPool) AddReq(txn *Request) (bool, *MicroBlock) {
 		newBlock.BucketID = pool.BucketId
 		newBlock.Timestamp = time.Now()
 		pool.AddMicroblock(newBlock)
-		pMsg := &pb.ProtocolMessage{
-			SenderId: membership.OwnID,
-			Msg: &pb.ProtocolMessage_Microblock{
-				Microblock: ToProtoMicroBlock(newBlock),
-			},
-		}
-		for _, nodeID := range membership.AllNodeIDs() {
-			messenger.EnqueueMsg(pMsg, nodeID)
+
+		if !IsBusy {
+			pMsg := &pb.ProtocolMessage{
+				SenderId: membership.OwnID,
+				Msg: &pb.ProtocolMessage_Microblock{
+					Microblock: ToProtoMicroBlock(newBlock),
+				},
+			}
+			for _, nodeID := range membership.AllNodeIDs() {
+				messenger.EnqueueMsg(pMsg, nodeID)
+			}
+		} else {
+			newBlock.IsForward = true
+			pMsg := &pb.ProtocolMessage{
+				SenderId: membership.OwnID,
+				Msg: &pb.ProtocolMessage_Microblock{
+					Microblock: ToProtoMicroBlock(newBlock),
+				},
+			}
+			// @TODO
+			pick := pickRandomNode()
+			logger.Info().Msgf("[%v] is going to forward a mb to %v ,mb hash is %x", membership.OwnID, pick, newBlock.Hash)
+			messenger.EnqueueMsg(pMsg, int32(pick))
 		}
 		// logger.Info().Msgf("Generating a block %x by %d",newBlock.Hash,newBlock.Sender)
 		return true, newBlock
@@ -179,10 +194,23 @@ func (pool *MemPool) AddReq(txn *Request) (bool, *MicroBlock) {
 				Microblock: ToProtoMicroBlock(newBlock),
 			},
 		}
-		for _, nodeID := range membership.AllNodeIDs() {
-			messenger.EnqueueMsg(pMsg, nodeID)
+		if !IsBusy {
+			for _, nodeID := range membership.AllNodeIDs() {
+				messenger.EnqueueMsg(pMsg, nodeID)
+			}
+		} else {
+			newBlock.IsForward = true
+			pMsg := &pb.ProtocolMessage{
+				SenderId: membership.OwnID,
+				Msg: &pb.ProtocolMessage_Microblock{
+					Microblock: ToProtoMicroBlock(newBlock),
+				},
+			}
+			// @TODO
+			pick := pickRandomNode()
+			logger.Info().Msgf("[%v] is going to forward a mb to %v , mb hash is %x", membership.OwnID, pick, newBlock.Hash)
+			messenger.EnqueueMsg(pMsg, int32(pick))
 		}
-		// logger.Info().Msgf("Generating a block %x by %d",newBlock.Hash,newBlock.Sender)
 		return true, newBlock
 
 	} else {
