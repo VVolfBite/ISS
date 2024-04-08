@@ -130,17 +130,21 @@ func HandleAck(ack *Ack) {
 	if Buckets[ack.BucketID].Mempool.IsStable(ack.MicroblockID) {
 		return
 	}
+	if ack.AckVerify() != nil{
+		logger.Info().Msgf("Warning: wrong ack received!")
+		return	
+	}
 	if ack.Receiver != membership.OwnID {
 		// @TODO
 		// voteIsVerified, err := crypto.PubVerify(ack.Signature, crypto.IDToByte(ack.MicroblockID), ack.Receiver)
-		voteIsVerified := true
+		ackVerified := true
 		var err error
 
 		if err != nil {
 			// log.Warningf("[%v] Error in verifying the signature in ack id: %x", r.ID(), ack.MicroblockID)
 			return
 		}
-		if !voteIsVerified {
+		if !ackVerified {
 			// log.Warningf("[%v] received an ack with invalid signature. vote id: %x", r.ID(), ack.MicroblockID)
 			return
 		}
@@ -187,17 +191,9 @@ func HandleMissingMicroblockRequest(mbr *MissingMBRequest) {
 	}
 }
 
-// --- 发送端负载均衡部分 --- //
-
 func pickRandomNode() int32 {
 	allNodes := membership.AllNodeIDs()
 	rand.Seed(time.Now().UnixNano())
 	randomIndex := rand.Intn(len(allNodes))
 	return allNodes[randomIndex]
-}
-
-// --- 接收端负载均衡 --- //
-func ReceiverLoadBalance(protocolMsg *pb.ProtocolMessage) error {
-	
-	return nil
 }

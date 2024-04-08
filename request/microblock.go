@@ -2,14 +2,17 @@ package request
 
 import (
 	"encoding/binary"
+	"fmt"
 	"time"
 
 	"github.com/golang/protobuf/ptypes"
 	"github.com/golang/protobuf/ptypes/timestamp"
 	"github.com/hyperledger-labs/mirbft/crypto"
+	"github.com/hyperledger-labs/mirbft/membership"
 	pb "github.com/hyperledger-labs/mirbft/protobufs"
 	"github.com/hyperledger-labs/mirbft/util"
 	"github.com/kelindar/bitmap"
+	// logger "github.com/rs/zerolog/log"
 )
 
 type PendingMicroblock struct {
@@ -17,7 +20,7 @@ type PendingMicroblock struct {
 	AckMap     map[int32]struct{} // who has sent acks
 }
 type MicroBlock struct {
-	Sn      int
+	Sn              int
 	BucketID        int
 	Hash            util.Identifier
 	Txns            []*Request
@@ -47,7 +50,7 @@ type Payload struct {
 type MissingMBRequest struct {
 	RequesterID   int32
 	BucketID      int32
-	Sn    int
+	Sn            int
 	MissingMBList []util.Identifier
 }
 type Block struct {
@@ -70,6 +73,19 @@ func (mb *MicroBlock) hash() util.Identifier {
 
 	// 计算哈希值并转换成 Identifier 类型
 	return util.BytesToIdentifier(crypto.MerkleHashDigests(hashList))
+}
+
+func (ack *Ack) AckVerify() error {
+	pk, err := crypto.PublicKeyFromBytes(membership.NodeIdentity(ack.Receiver).PubKey)
+	if err != nil {
+		return fmt.Errorf("could not verify checkpoint signature: %s", err)
+	}
+	hash := crypto.Hash(ack.AckDigest())
+	err = crypto.CheckSig(hash, pk, ack.Signature)
+	if err != nil {
+		return fmt.Errorf("could not verify checkpoint signature: %s", err)
+	}
+	return nil
 }
 
 func (ack *Ack) AckDigest() []byte {
@@ -119,7 +135,6 @@ func (pl *Payload) GenerateHashList() [][]byte {
 	return hashList
 }
 
-
 func (pd *PendingBlock) AddMicroblock(mb *MicroBlock) *Block {
 	_, exists := pd.MissingMap[mb.Hash]
 	if exists {
@@ -150,7 +165,7 @@ func FromProtoMissingMBRequest(protoReq *pb.MissingMBRequest) *MissingMBRequest 
 
 	return &MissingMBRequest{
 		RequesterID:   protoReq.RequesterId,
-		Sn:    int(protoReq.Sn),
+		Sn:            int(protoReq.Sn),
 		MissingMBList: missingMBList,
 		BucketID:      protoReq.BucketId,
 	}
@@ -165,7 +180,7 @@ func ToProtoMissingMBRequest(req *MissingMBRequest) *pb.MissingMBRequest {
 	return &pb.MissingMBRequest{
 		BucketId:      req.BucketID,
 		RequesterId:   req.RequesterID,
-		Sn:    int32(req.Sn),
+		Sn:            int32(req.Sn),
 		MissingMbList: protoMissingMBList,
 	}
 }
@@ -203,7 +218,7 @@ func ToProtoMicroBlock(mb *MicroBlock) *pb.MicroBlock {
 	}
 
 	return &pb.MicroBlock{
-		Sn:      		int32(mb.Sn),
+		Sn:              int32(mb.Sn),
 		Hash:            &pb.Identifier{Value: mb.Hash[:]},
 		Txns:            txns,
 		Timestamp:       TimeToProtoTimestamp(mb.Timestamp),
@@ -226,7 +241,7 @@ func FromProtoMicroBlock(protoMb *pb.MicroBlock) *MicroBlock {
 	}
 
 	return &MicroBlock{
-		Sn:      		int(protoMb.Sn),
+		Sn:              int(protoMb.Sn),
 		Hash:            util.BytesToIdentifier(protoMb.Hash.Value),
 		Txns:            txns,
 		Timestamp:       ProtoTimestampToTime(protoMb.Timestamp),
