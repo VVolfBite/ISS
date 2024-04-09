@@ -29,47 +29,9 @@ type MemPool struct {
 	totalTx            int64
 	MBmu               sync.Mutex
 	Reqmu              sync.Mutex
-	lastReqTime        time.Time
-	autoClearThreshold time.Duration
 }
 
-func (pool *MemPool) AutoClear() {
-	// 计算当前时间与上次添加请求时间的间隔
-	for {
-		pool.Reqmu.Lock()
-		duration := time.Since(pool.lastReqTime)
-		// 如果间隔超过自动清理阈值，则执行清理操作
-		if duration > pool.autoClearThreshold && pool.currSize > 0 {
-			logger.Info().Msgf("Duration: %d", duration.Nanoseconds())
-			logger.Info().Msg("Auto clear triggered.")
 
-			// 创建一个新的微块
-			var id int
-			allTxn := pool.makeTxnSlice()
-			newBlock := NewMicroblock(id, allTxn)
-			pool.currSize = 0
-			newBlock.Sender = membership.OwnID
-			newBlock.BucketID = pool.BucketId
-			newBlock.Timestamp = time.Now()
-			// 将新的微块添加到内存池中
-			pool.AddMicroblock(newBlock)
-			// 将新的微块发送给其他节点
-			pMsg := &pb.ProtocolMessage{
-				SenderId: membership.OwnID,
-				Msg: &pb.ProtocolMessage_Microblock{
-					Microblock: ToProtoMicroBlock(newBlock),
-				},
-			}
-			for _, nodeID := range membership.AllNodeIDs() {
-				messenger.EnqueueMsg(pMsg, nodeID)
-			}
-			pool.lastReqTime = time.Now()
-
-		}
-		pool.Reqmu.Unlock()
-		time.Sleep(time.Second * 3) // 睡眠1秒钟
-	}
-}
 
 // NewMemPool creates a new mempool
 func NewMemPool(BucketId int) *MemPool {
@@ -91,38 +53,25 @@ func NewMemPool(BucketId int) *MemPool {
 		stableMBs:          make(map[util.Identifier]struct{}),
 		currSize:           0,
 		txnList:            list.New(),
-		lastReqTime:        time.Now(),
-		autoClearThreshold: 10000000000,
 	}
-	go mempool.AutoClear()
 	return mempool
 }
 
 // AddReq adds a transaction and returns a microblock if msize is reached
 // then the contained transactions should be deleted
 func (pool *MemPool) AddReq(txn *Request) (bool, *MicroBlock) {
-	// if txn.Msg.RequestId.ClientSn >= 3800 {
-	// 	logger.Info().Msgf("Txn in mempool %d at bucket %d", txn.Msg.RequestId.ClientSn, pool.BucketId)
-	// 	logger.Info().Msgf("This pool size is %d,req:%d", pool.currSize, pool.txnList.Len())
-	// }
 	pool.Reqmu.Lock()
 	defer pool.Reqmu.Unlock()
-	pool.lastReqTime = time.Now()
 	if pool.RemainingTx() >= int64(pool.memsize) {
-		//log.Warningf("mempool's tx list is full")
 		return false, nil
 	}
 	if pool.RemainingMB() >= int64(pool.memsize) {
-		//log.Warningf("mempool's mb is full")
 		return false, nil
 	}
 
 	pool.totalTx++
-
-	// get the size of the structure. txn is the pointer.
 	tranSize := util.SizeOf(txn)
 	totalSize := tranSize + pool.currSize
-	// logger.Printf("Txn size is %d ,cur mempool size is %d\n, cutting size is %d", tranSize, totalSize, pool.msize)
 
 	if tranSize > pool.msize {
 		return false, nil
@@ -157,12 +106,10 @@ func (pool *MemPool) AddReq(txn *Request) (bool, *MicroBlock) {
 					Microblock: ToProtoMicroBlock(newBlock),
 				},
 			}
-			// @TODO
 			pick := pickRandomNode()
-			logger.Info().Msgf("[%v] is going to forward a mb to %v ,mb hash is %x", membership.OwnID, pick, newBlock.Hash)
+			logger.Debug().Msgf("[%v] is going to forward a mb to %v ,mb hash is %x", membership.OwnID, pick, newBlock.Hash)
 			messenger.EnqueueMsg(pMsg, int32(pick))
 		}
-		// logger.Info().Msgf("Generating a block %x by %d",newBlock.Hash,newBlock.Sender)
 		return true, newBlock
 
 	} else if totalSize == pool.msize {
@@ -177,17 +124,7 @@ func (pool *MemPool) AddReq(txn *Request) (bool, *MicroBlock) {
 		newBlock.Timestamp = time.Now()
 
 		pool.AddMicroblock(newBlock)
-
-		// ack := &Ack{
-		// 	Receiver: membership.OwnID,
-		// 	BucketID: pool.BucketId,
-		// 	MicroblockID: newBlock.Hash,
-		// 	Signature: nil,
-		// }
-		// hash := crypto.Hash(ack.AckDigest())
-		// signature, err := crypto.Sign(hash, sk)
-
-		// pool.AddAck()
+		// 不需要 我们可以给自己加一份
 		pMsg := &pb.ProtocolMessage{
 			SenderId: membership.OwnID,
 			Msg: &pb.ProtocolMessage_Microblock{
@@ -208,7 +145,7 @@ func (pool *MemPool) AddReq(txn *Request) (bool, *MicroBlock) {
 			}
 			// @TODO
 			pick := pickRandomNode()
-			logger.Info().Msgf("[%v] is going to forward a mb to %v , mb hash is %x", membership.OwnID, pick, newBlock.Hash)
+			logger.Debug().Msgf("[%v] is going to forward a mb to %v , mb hash is %x", membership.OwnID, pick, newBlock.Hash)
 			messenger.EnqueueMsg(pMsg, int32(pick))
 		}
 		return true, newBlock
@@ -216,7 +153,6 @@ func (pool *MemPool) AddReq(txn *Request) (bool, *MicroBlock) {
 	} else {
 		pool.txnList.PushBack(txn)
 		pool.currSize = totalSize
-		// logger.Info().Msg("Still not return yet")
 		return false, nil
 
 	}
@@ -227,10 +163,7 @@ func (pool *MemPool) AddReq(txn *Request) (bool, *MicroBlock) {
 func (pool *MemPool) AddMicroblock(mb *MicroBlock) error {
 	pool.MBmu.Lock()
 	defer pool.MBmu.Unlock()
-	// logger.Info().Any("MS:%d",len(ReceivedMBs)).Msg("About to add mb")
-	//if pool.microblocks.Len() >= pool.memsize {
-	//	return errors.New("the memory queue is full")
-	//}
+
 	_, exists := pool.microblockMap[mb.Hash]
 	if exists {
 		return nil
@@ -240,8 +173,7 @@ func (pool *MemPool) AddMicroblock(mb *MicroBlock) error {
 		Microblock: mb,
 		AckMap:     make(map[int32]struct{}),
 	}
-	// 自己的这一份还不能添
-	// pm.AckMap[mb.Sender] = struct{}{}
+	// 自己的这一份还不能添,因为在发送ACK时并不会把自己忽略
 	pool.microblockMap[mb.Hash] = mb
 
 	//check if there are some acks of this microblock arrived before
@@ -249,23 +181,18 @@ func (pool *MemPool) AddMicroblock(mb *MicroBlock) error {
 	if received {
 		// if so, add these ack to the pendingblocks
 		for id, _ := range buffer {
-			//pool.pendingMicroblocks[mb.Hash].ackMap[ack] = struct{}{}
 			pm.AckMap[id] = struct{}{}
 		}
 		if len(pm.AckMap) >= pool.threshhold {
-			// logger.Info().Msgf("Stable %x at pool:%d",mb.Hash,pool.BucketId)
 			if _, exists = pool.stableMBs[mb.Hash]; !exists {
 				pool.stableMicroblocks.PushBack(mb)
 				pool.stableMBs[mb.Hash] = struct{}{}
 				delete(pool.pendingMicroblocks, mb.Hash)
-				//log.Debugf("microblock id: %x becomes stable from buffer", mb.Hash)
 			}
 		} else {
-			// logger.Info().Msgf("Pending %x at pool:%d",mb.Hash,pool.BucketId)
 			pool.pendingMicroblocks[mb.Hash] = pm
 		}
 	} else {
-		// logger.Info().Msgf("Pending %x at pool:%d",mb.Hash,pool.BucketId)
 		pool.pendingMicroblocks[mb.Hash] = pm
 	}
 	return nil
@@ -273,7 +200,6 @@ func (pool *MemPool) AddMicroblock(mb *MicroBlock) error {
 
 // AddAck adds an ack and push a microblock into the stableMicroblocks queue if it receives enough acks
 func (pool *MemPool) AddAck(ack *Ack) {
-	// logger.Info().Any("Confirm MB:",ack.MicroblockID).Any("Confirm Peer:",ack.Receiver).Any("Confirm Bucket:",ack.BucketID).Msg("Adding ack now!")
 	pool.MBmu.Lock()
 	defer pool.MBmu.Unlock()
 	target, received := pool.pendingMicroblocks[ack.MicroblockID]
@@ -282,7 +208,6 @@ func (pool *MemPool) AddAck(ack *Ack) {
 		target.AckMap[ack.Receiver] = struct{}{}
 		if len(target.AckMap) >= pool.threshhold {
 			if _, exists := pool.stableMBs[target.Microblock.Hash]; !exists {
-				// logger.Info().Msgf("Moving pending to stable: %x at pool %d",target.Microblock.Hash,pool.BucketId)
 				pool.stableMicroblocks.PushBack(target.Microblock)
 				pool.stableMBs[target.Microblock.Hash] = struct{}{}
 			}
@@ -306,13 +231,11 @@ func (pool *MemPool) AddAck(ack *Ack) {
 func (pool *MemPool) GeneratePayloadWithSize(batchSize int) *Payload {
 	sigMap := make(map[util.Identifier]map[int32][]byte, 0)
 	microblockList := make([]*MicroBlock, 0)
-
 	for i := 0; i < batchSize; i++ {
 		mb := pool.front()
 		if mb == nil {
 			break
 		}
-		//log.Debugf("microblock id: %x is deleted from mempool when proposing", mb.Hash)
 		microblockList = append(microblockList, mb)
 
 		sigs := make(map[int32][]byte, 0)
@@ -320,14 +243,10 @@ func (pool *MemPool) GeneratePayloadWithSize(batchSize int) *Payload {
 		for id, sig := range pool.ackBuffer[mb.Hash] {
 			count++
 			sigs[id] = sig
-			// @TODO
-			// if count == config.Configuration.Q {
-			// 	break
-			// }
+			delete(pool.ackBuffer, mb.Hash)
 		}
 		sigMap[mb.Hash] = sigs
 	}
-	// logger.Info().Msgf("Generating a mb with sig:",len(sigMap))
 	return NewPayload(microblockList, sigMap) // payload 带有mb以及他们相关的ack收集信息以便向其他人证明信息质量
 }
 
@@ -378,19 +297,13 @@ func (pool *MemPool) FillProposal(MBHashList [][]byte) *PendingBlock {
 			found = true
 			existingBlocks = append(existingBlocks, pool.pendingMicroblocks[util.BytesToIdentifier(id)].Microblock)
 			delete(pool.pendingMicroblocks, util.BytesToIdentifier(id))
-			//log.Debugf("microblock id: %x is deleted from pending when filling", id)
 		}
-		// logger.Info().Msgf("Searching stable ... len: %d",pool.stableMicroblocks.Len())
 		for e := pool.stableMicroblocks.Front(); e != nil; e = e.Next() {
-			// do something with e.Value
 			mb := e.Value.(*MicroBlock)
-			// logger.Info().Msgf("%x vs %x",mb.Hash,util.BytesToIdentifier(id))
 			if mb.Hash == util.BytesToIdentifier(id) {
-				// logger.Info().Msgf("Found mb in stable ... len: %x",mb.Hash)
-				existingBlocks = append(existingBlocks, mb)
 				found = true
+				existingBlocks = append(existingBlocks, mb)
 				pool.stableMicroblocks.Remove(e)
-				//log.Debugf("microblock id: %x is deleted from stable when filling", mb.Hash)
 				break
 			}
 		}
@@ -399,6 +312,37 @@ func (pool *MemPool) FillProposal(MBHashList [][]byte) *PendingBlock {
 		}
 	}
 	return NewPendingBlock(MBHashList, missingBlocks, existingBlocks)
+}
+
+
+// 我们需要尽可能的移除这个线程，这是一个严重影响性能的地方
+// 本质是为了防止内存池中残留Req， 也就是在CutBatchs
+// @DONE
+func (pool *MemPool) ForceClear() {
+	pool.Reqmu.Lock()
+	defer pool.Reqmu.Unlock()
+	if pool.currSize > 0 {
+		logger.Info().Msg("Force clear triggered.")
+		var id int
+		allTxn := pool.makeTxnSlice()
+		newBlock := NewMicroblock(id, allTxn)
+		pool.currSize = 0
+		newBlock.Sender = membership.OwnID
+		newBlock.BucketID = pool.BucketId
+		newBlock.Timestamp = time.Now()
+		// 将新的微块添加到内存池中
+		pool.AddMicroblock(newBlock)
+		// 将新的微块发送给其他节点
+		pMsg := &pb.ProtocolMessage{
+			SenderId: membership.OwnID,
+			Msg: &pb.ProtocolMessage_Microblock{
+				Microblock: ToProtoMicroBlock(newBlock),
+			},
+		}
+		for _, nodeID := range membership.AllNodeIDs() {
+			messenger.EnqueueMsg(pMsg, nodeID)
+		}
+	}
 }
 
 func (pool *MemPool) IsStable(id util.Identifier) bool {
@@ -455,9 +399,7 @@ func (pool *MemPool) front() *MicroBlock {
 	if !ok {
 		return nil
 	}
-	// pool.RemoveMicroblock(ele.(*util.Identifier))
 	pool.stableMicroblocks.Remove(ele)
-	// logger.Info().Msgf("Popping out a mb %x with sig: %d",val.Hash, len(pool.ackBuffer[val.Hash]))
 	return val
 }
 

@@ -16,15 +16,12 @@ package request
 
 import (
 	"fmt"
-	"math/rand"
 	"time"
 
-	// "github.com/hyperledger-labs/mirbft/config"
 	"github.com/hyperledger-labs/mirbft/crypto"
 	"github.com/hyperledger-labs/mirbft/membership"
 	"github.com/hyperledger-labs/mirbft/messenger"
 
-	// "github.com/hyperledger-labs/mirbft/membership"
 	pb "github.com/hyperledger-labs/mirbft/protobufs"
 	"github.com/hyperledger-labs/mirbft/util"
 	logger "github.com/rs/zerolog/log"
@@ -51,23 +48,23 @@ func (b *Batch) FillBatch(sn int) *FilledBatch {
 	if len(b.MBHashList) == 0 {
 		mu.Unlock()
 		return newFilledBatch
-	}	
+	}
 
-	bucketID := b.BucketId	
+	bucketID := b.BucketId
 	var pendingBlock *PendingBlock
 	pendingBlock, exits := PendingBlockMap[b.Sn]
-	if !exits{
+	if !exits {
 		pendingBlock = Buckets[bucketID].Mempool.FillProposal(b.MBHashList)
-	} else{
-		logger.Info().Msgf("We got a remaining pd with %d to go at sn:%d ",len(pendingBlock.MissingMap),sn)
-		for mbhash,_ := range pendingBlock.MissingMap{
-			logger.Info().Msgf("Misssing %x",mbhash)
+	} else {
+		logger.Info().Msgf("A remaining pending block with %d missings to go at sn:%d ", len(pendingBlock.MissingMap), sn)
+		for mbhash, _ := range pendingBlock.MissingMap {
+			logger.Info().Msgf("Misssing MB is %x", mbhash)
 		}
 	}
 
 	block := pendingBlock.CompleteBlock()
+
 	if block != nil {
-		// logger.Info().Msgf("[%v] a block is ready, id: %d", membership.OwnID, b.Sn)
 		for _, mb := range block.Payload.MicroblockList {
 			newFilledBatch.Requests = append(newFilledBatch.Requests, mb.Txns...)
 		}
@@ -78,37 +75,37 @@ func (b *Batch) FillBatch(sn int) *FilledBatch {
 	var MissingMBList []*pb.Identifier
 
 	PendingBlockMap[b.Sn] = pendingBlock
-	logger.Debug().Msgf("%v microblocks are missing in id: %d", len(pendingBlock.MissingMap), b.Sn)
+	logger.Debug().Msgf("[%v] microblocks are missing in id: %d", len(pendingBlock.MissingMap), b.Sn)
 	for mbid, _ := range pendingBlock.MissingMap {
 		MissingMBs[mbid] = b.Sn
 		MissingMBList = append(MissingMBList, ToProtoIdentifier(mbid))
-		logger.Info().Msgf("[%v] a mb is missing, hash: %x sn:%d and record as missing mbs at %d", membership.OwnID, mbid,b.Sn,b.Sn)
+		logger.Debug().Msgf("[%v] a mb is missing, hash: %x sn:%d and record as missing mbs at %d", membership.OwnID, mbid, b.Sn, b.Sn)
 	}
-	// 发送Req请求召回missing entry
+
+	// 发送Req请求召回missing mb
+
 	missingRequest := pb.MissingMBRequest{
 		RequesterId:   membership.OwnID,
 		BucketId:      int32(b.BucketId),
 		Sn:            int32(b.Sn),
 		MissingMbList: MissingMBList,
 	}
+
 	msg := &pb.ProtocolMessage{
 		SenderId: int32(membership.OwnID),
 		Msg: &pb.ProtocolMessage_MissingMicroblockRequest{
 			MissingMicroblockRequest: &missingRequest,
 		},
 	}
-	rand.Seed(time.Now().UnixNano())
-	nodes := membership.AllNodeIDs()
-	randomIndex := rand.Intn(len(nodes))
-	randomElement := nodes[randomIndex]
-	
+
+	randNode := pickRandomNode()
+
 	// 确保选中的随机元素不是 membership.OwnID
-	for randomElement == membership.OwnID {
-		randomIndex = rand.Intn(len(nodes))
-		randomElement = nodes[randomIndex]
+	for randNode == membership.OwnID {
+		randNode = pickRandomNode()
 	}
-	
-	messenger.EnqueueMsg(msg, randomElement)
+
+	messenger.EnqueueMsg(msg, randNode)
 	mu.Unlock()
 	time.Sleep(time.Second * 10)
 	return nil
@@ -155,11 +152,10 @@ func (b *Batch) CheckBucket(activeBuckets []int) error {
 	return nil
 }
 
-// 检查来自CLient的签名
+// 检查签名
 func (b *Batch) CheckSignatures() error {
 	if batchVerifierFunc(b) {
 		return nil
-
 	} else {
 		return fmt.Errorf("batch signature verification failed")
 	}
@@ -176,7 +172,6 @@ func NewBatch(msg *pb.Batch) *Batch {
 		BucketId:   -1,
 		Sn:         -1,
 	}
-
 	for i, MBHash := range msg.MbHashList {
 		newBatch.MBHashList[i] = MBHash
 	}
@@ -185,17 +180,37 @@ func NewBatch(msg *pb.Batch) *Batch {
 	}
 	newBatch.BucketId = int(msg.BucketId)
 	newBatch.Sn = int(msg.Sn)
-	// logger.Info().Msgf("A new batch with len: %d at bucket:%d",len(newBatch.MBHashList),newBatch.BucketId)
 	return newBatch
+}
+
+// Returns a protobuf message containing this Batch.
+// 将Batch还原成ReqMsg
+func (b *Batch) Message() *pb.Batch {
+	// Create empty Batch message
+	batchMsg := &pb.Batch{
+		MbHashList: make([][]byte, len(b.MBHashList), len(b.MBHashList)),
+		SigMap:     make([]*pb.SigmapEntry, 0),
+		BucketId:   -1,
+		Sn:         -1,
+	}
+
+	// Populate Batch message with request messages
+	for i, MBHash := range b.MBHashList {
+		batchMsg.MbHashList[i] = MBHash
+	}
+	batchMsg.BucketId = int32(b.BucketId)
+	batchMsg.Sn = int32(b.Sn)
+	for key, value := range b.SigMap {
+		batchMsg.SigMap = append(batchMsg.SigMap, &pb.SigmapEntry{Key: ToProtoIdentifier(key), Value: &pb.MBSig{MicroblockSigmap: value}})
+	}
+
+	return batchMsg
 }
 
 // 利用负载装填一个batch结构并检查签名
 // 改动 我们在用pb.Batch的信息还原一个Batch 对于我们装填了MB的Batch来说，似乎验证MB本身 没有意义，因为还是MB的安全是由PAB保证的
 func NewFilledBatch(msg *pb.FilledBatch) *FilledBatch {
-
-	// logger.Debug().Int("nMB", len(msg.Requests)).Msg("Creating new Batch.")
-
-	newBatch := &FilledBatch{
+	newFilledBatch := &FilledBatch{
 		Requests: make([]*Request, 0),
 	}
 	for _, reqMsg := range msg.Requests {
@@ -204,12 +219,12 @@ func NewFilledBatch(msg *pb.FilledBatch) *FilledBatch {
 			Digest:   Digest(reqMsg),
 			Buffer:   getBuffer(reqMsg.RequestId.ClientId),
 			Bucket:   getBucket(reqMsg),
-			Verified: false, // signature has not yet been verified
+			Verified: true,
 			InFlight: false, // request has not yet been proposed (an identical one might have been, though, in which case we discard this request object)
 			Next:     nil,   // This request object is not part of a bucket list.
 			Prev:     nil,
 		}
-		newBatch.Requests = append(newBatch.Requests, req)
+		newFilledBatch.Requests = append(newFilledBatch.Requests, req)
 	}
 
 	// Check signatures of the requests in the new batch.
@@ -221,7 +236,7 @@ func NewFilledBatch(msg *pb.FilledBatch) *FilledBatch {
 	// 	}
 	// }
 
-	return newBatch
+	return newFilledBatch
 }
 
 func (b *FilledBatch) Message() *pb.FilledBatch {
@@ -241,68 +256,28 @@ func (b *FilledBatch) Message() *pb.FilledBatch {
 
 }
 
-func isMsgUTF8Valid(msg *pb.Batch) bool {
-	// // 检查 MbHashList 中的字节切片
-	// for i, hash := range msg.MbHashList {
-	//     if !utf8.Valid(hash) {
-	//         logger.Info().Msgf("Invalid UTF-8 in MbHashList[%d]: %v\n", i, hash)
-	//         return false
-	//     }
-	// }
-
-	// // 检查 SigMap 中的键和值
-	// for key := range msg.SigMap {
-	//     if !utf8.ValidString(string(key)) {
-	//         logger.Info().Msgf("Invalid UTF-8 in SigMap key: %v\n", key)
-	//         return false
-	//     }
-	// }
-
-	// // 其他字段可以根据需要进行类似的检查
-
-	return true
-}
-
-// Returns a protobuf message containing this Batch.
-// 将Batch还原成ReqMsg
-func (b *Batch) Message() *pb.Batch {
-	// Create empty Batch message
-	msg := pb.Batch{
-		MbHashList: make([][]byte, len(b.MBHashList), len(b.MBHashList)),
-		SigMap:     make([]*pb.SigmapEntry, 0),
-		BucketId:   -1,
-		Sn:         -1,
-	}
-
-	// Populate Batch message with request messages
-	for i, MBHash := range b.MBHashList {
-		msg.MbHashList[i] = MBHash
-	}
-	msg.BucketId = int32(b.BucketId)
-	msg.Sn = int32(b.Sn)
-	for key, value := range b.SigMap {
-		msg.SigMap = append(msg.SigMap, &pb.SigmapEntry{Key: ToProtoIdentifier(key), Value: &pb.MBSig{MicroblockSigmap: value}})
-	}
-
-	// Return final Batch message
-	// if !isMsgUTF8Valid(&msg) {
-	// 	logger.Info().Msgf("Containing unvalid msg")
-	// }
-	return &msg
-}
-
 // Returns requests in the batch in their buckets after an unsuccessful proposal.
 // TODO: Optimization: First group the requests by bucket and then prepend each group at once.
 // 将未能Inflight的Req重新取回，应该是在提议后立即调用检查
 // @TODO 在MB下，我们还需要管Resurrect，如何将共识失败的MB还原并等待重新提议？ 总之这不是原则问题，我们姑且忽略
+// 我们把mb放回stable mb等待下一次提议
 func (b *Batch) Resurrect() {
-	// for _, req := range b.Requests {
-	// 	req.InFlight = false
-	// 	req.Bucket.Prepend(req)
-	// }
+	bucket := Buckets[b.BucketId]
+	bucket.Mutex.Lock()
+	defer bucket.Mutex.Unlock()
+	for _, MBHash := range b.MBHashList {
+		MBId := util.BytesToIdentifier(MBHash)
+		MB, exist := bucket.Mempool.microblockMap[MBId]
+		if exist {
+			bucket.Mempool.stableMBs[MBId] = struct{}{}
+			bucket.Mempool.stableMicroblocks.PushBack(MB)
+			bucket.Mempool.ackBuffer[MBId] = b.SigMap[MBId]
+		}
+	}
 }
 
-// 签名确认应当在收到MB 时回复ACK前完成 ，所以以下三种验证方式均不再需要
+// 签名确认应当在收到MB 时回复ACK前完成 ，所以以下三种验证客户请求的方式均不再需要
+// 我们需要验证的是Sig对应MB的情况
 // @TODO 在ACK前完成签名验证
 func checkSignaturesSequential(b *Batch) bool {
 	// for _, req := range b.Requests {
@@ -396,4 +371,21 @@ func BatchDigest(batch *pb.Batch) []byte {
 		MBDigests[i] = MBHash
 	}
 	return crypto.ParallelDataArrayHash(append(MBDigests, crypto.Hash(metadata)))
+}
+
+func isMsgUTF8Valid(msg *pb.Batch) bool {
+	// for i, hash := range msg.MbHashList {
+	//     if !utf8.Valid(hash) {
+	//         logger.Info().Msgf("Invalid UTF-8 in MbHashList[%d]: %v\n", i, hash)
+	//         return false
+	//     }
+	// }
+
+	// for key := range msg.SigMap {
+	//     if !utf8.ValidString(string(key)) {
+	//         logger.Info().Msgf("Invalid UTF-8 in SigMap key: %v\n", key)
+	//         return false
+	//     }
+	// }
+	return true
 }

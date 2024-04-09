@@ -74,7 +74,6 @@ type Bucket struct {
 }
 
 func NewBucket(id int) *Bucket {
-
 	return &Bucket{
 		id:       id,
 		reqIndex: make(map[int64]*Request),
@@ -335,12 +334,10 @@ func (b *Bucket) GetBatchAndRemoveReq(n int, dest Batch) Batch {
 	payload := b.Mempool.GeneratePayloadWithSize(n)
 	dest.MBHashList = append(dest.MBHashList, payload.GenerateHashList()...)
 	for k, v := range payload.SigMap {
-		// 将 kmap 中的键值对添加到 dest.SigMap 中
 		dest.SigMap[k] = v
-		// logger.Info().Msgf("Here s the proof len: %d",len(v))
 	}
-	// While there are still Requests in the bucket and the limit has not been reached.
 	dest.BucketId = b.id
+	// 其实在Stable MB生成时即可以进行移除了，这里是慢一拍的操作，不过没有大问题 
 	for _, mb := range payload.MicroblockList {
 		for _, req := range mb.Txns {
 			b.removeNoLock(req)

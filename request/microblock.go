@@ -11,14 +11,14 @@ import (
 	"github.com/hyperledger-labs/mirbft/membership"
 	pb "github.com/hyperledger-labs/mirbft/protobufs"
 	"github.com/hyperledger-labs/mirbft/util"
-	"github.com/kelindar/bitmap"
 	// logger "github.com/rs/zerolog/log"
 )
 
-type PendingMicroblock struct {
-	Microblock *MicroBlock
-	AckMap     map[int32]struct{} // who has sent acks
-}
+// 这里引入了新的数据结构
+
+
+// MicroBlock 用于数据分发的基本分发单元
+// @部分字段尚未启用，如TImeStamp以及Hops
 type MicroBlock struct {
 	Sn              int
 	BucketID        int
@@ -29,8 +29,12 @@ type MicroBlock struct {
 	Sender          int32
 	IsRequested     bool
 	IsForward       bool
-	Bitmap          bitmap.Bitmap
 	Hops            int
+}
+
+type PendingMicroblock struct {
+	Microblock *MicroBlock
+	AckMap     map[int32]struct{} // who has sent acks
 }
 type Ack struct {
 	Receiver     int32
@@ -226,7 +230,6 @@ func ToProtoMicroBlock(mb *MicroBlock) *pb.MicroBlock {
 		Sender:          int32(mb.Sender),
 		IsRequested:     mb.IsRequested,
 		IsForward:       mb.IsForward,
-		Bitmap:          mb.Bitmap.ToBytes(), // 假设 Bitmap 是一个包含 Bytes() 方法的类型
 		Hops:            int32(mb.Hops),
 		BucketId:        int32(mb.BucketID),
 	}
@@ -249,7 +252,6 @@ func FromProtoMicroBlock(protoMb *pb.MicroBlock) *MicroBlock {
 		Sender:          int32(protoMb.Sender),
 		IsRequested:     protoMb.IsRequested,
 		IsForward:       protoMb.IsForward,
-		Bitmap:          bitmap.FromBytes(protoMb.Bitmap),
 		Hops:            int(protoMb.Hops),
 		BucketID:        int(protoMb.BucketId),
 	}

@@ -33,7 +33,7 @@ type BucketGroup struct {
 
 	// Total number of requests in the buckets.
 	// Must be read / updated atomically when requests are being added to buckets and not all buckets are locked.
-	totalStableMicroBlock int32
+	totalMicroBlock int32
 
 	// When CutBatch() has been called but the Buckets have fewer than BatchSize requests in total, CutBatch() blocks.
 	// Before blocking, it sets cutThreshold to the number of requests it is waiting for.
@@ -79,7 +79,7 @@ func NewBucketGroup(bucketIDs []int) *BucketGroup {
 
 	return &BucketGroup{
 		buckets:               bucketList,
-		totalStableMicroBlock: 0,
+		totalMicroBlock: 0,
 		cutThreshold:          -1,
 		timer:                 nil,
 		batchTrigger:          make(chan struct{}),
@@ -125,13 +125,13 @@ func (bg *BucketGroup) CutBatch(size int, timeout time.Duration, sn int32) *Batc
 	var maxIndex = 0
 
 	for index, bucket := range bg.buckets {
-		bucket.Mempool.MBmu.Lock()
-		
+		// bucket.Mempool.MBmu.Lock()
+		bucket.Mempool.ForceClear()	
 		if bucket.Mempool.stableMicroblocks.Len() >= maxNum {
 			maxNum = bucket.Mempool.stableMicroblocks.Len()
 			maxIndex = index
 		}
-		bucket.Mempool.MBmu.Unlock()
+		// bucket.Mempool.MBmu.Unlock()
 	}
 
 	if size <= maxNum {
@@ -170,7 +170,7 @@ func (bg *BucketGroup) CutBatch(size int, timeout time.Duration, sn int32) *Batc
 }
 
 // Blocks until the buckets in the BucketGroup (cumulatively) contain numMBs requests or until timeout elapses.
-// When WaitForMBs returns, bg.totalStableMicroBlock accurately represents the total number of requests in the BucketGroup.
+// When WaitForMBs returns, bg.totalMicroBlock accurately represents the total number of requests in the BucketGroup.
 func (bg *BucketGroup) WaitForMBs(numMBs int, timeout time.Duration) {
 	alreadyWaited := bg.waitMinimum()
 	bg.lockBuckets()
@@ -179,7 +179,7 @@ func (bg *BucketGroup) WaitForMBs(numMBs int, timeout time.Duration) {
 }
 
 // Blocks until the buckets in the BucketGroup (cumulatively) contain numMBs requests or until timeout elapses.
-// When WaitForMBs returns, bg.totalStableMicroBlock accurately represents the total number of requests in the BucketGroup.
+// When WaitForMBs returns, bg.totalMicroBlock accurately represents the total number of requests in the BucketGroup.
 // ATTENTION: All Buckets must be LOCKED when calling this method.
 //
 //	May release and re-acquire the bucket locks before returning.
@@ -189,7 +189,7 @@ func (bg *BucketGroup) waitForStableMicroBlockLocked(numMicroblock int, timeout 
 
 	// Count all requests in all buckets in the group.
 	// (A normal assignment suffices, as all buckets are locked.)
-	// bg.totalStableMicroBlock = int32(bg.CountStableMicroBlock())
+	// bg.totalMicroBlock = int32(bg.CountStableMicroBlock())
 
 	// If there are enough requests in the bucket, return immediately.
 	if (timeout == 0) {
@@ -238,13 +238,13 @@ func (bg *BucketGroup) waitMinimum() int64 {
 func (bg *BucketGroup) MBAdded() {
 
 	// Atomically increment and fetch the number of requests in the BucketGroup.
-	// logger.Info().Msgf("%x",&bg.totalStableMicroBlock)
-	totalStableMicroBlock := atomic.AddInt32(&bg.totalStableMicroBlock, 1)
+	// logger.Info().Msgf("%x",&bg.totalMicroBlock)
+	totalMicroBlock := atomic.AddInt32(&bg.totalMicroBlock, 1)
 
 	// If CutBatch() is waiting and the required threshold of requests has been reached
 	// It is important to use == (and not >= ) when comparing the request count, s.t. the body of the condition
 	// is only executed once.
-	if bg.timer != nil && int(totalStableMicroBlock) == bg.cutThreshold {
+	if bg.timer != nil && int(totalMicroBlock) == bg.cutThreshold {
 
 		// Stop the timer
 		if bg.timer.Stop() {
