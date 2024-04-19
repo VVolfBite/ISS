@@ -20,6 +20,7 @@ import (
 	"sync"
 
 	"github.com/hyperledger-labs/mirbft/config"
+	"github.com/hyperledger-labs/mirbft/membership"
 	"github.com/hyperledger-labs/mirbft/tracing"
 	"github.com/rs/zerolog"
 	logger "github.com/rs/zerolog/log"
@@ -217,12 +218,8 @@ func (b *Bucket) addNoLock(newReq *Request) (*Request, bool) {
 			//	Msg("Adding new request to bucket.")
 			b.append(newReq)
 			b.reqIndex[reqID] = newReq
-			new, _ := b.Mempool.AddReq(newReq)
-			// If the Bucket is part of a BucketGroup that is waiting for more requests to arrive,
-			// notify the BucketGroup.
-			if new && b.Group != nil{
-				b.Group.MBAdded()
-			}
+			logger.Info().Msgf("Add req: (%d:%d) to bucket:%d at peers %d", newReq.Msg.RequestId.ClientId, newReq.Msg.RequestId.ClientSn, newReq.Bucket.id, membership.OwnID)
+			b.Mempool.AddReq(newReq)
 
 			return newReq, false
 		}
@@ -277,11 +274,6 @@ func (b *Bucket) Prepend(req *Request) {
 
 		// Update the bucket's request counter.
 		b.numRequests++
-
-		// Notify bucket group if a batch is being cut.
-		if b.Group != nil {
-			b.Group.MBAdded()
-		}
 	}
 }
 
@@ -330,14 +322,13 @@ func (b *Bucket) GetBatchAndRemoveReq(n int, dest Batch) Batch {
 	b.Mempool.MBmu.Lock()
 	defer b.Mempool.MBmu.Unlock()
 
-	
 	payload := b.Mempool.GeneratePayloadWithSize(n)
 	dest.MBHashList = append(dest.MBHashList, payload.GenerateHashList()...)
 	for k, v := range payload.SigMap {
 		dest.SigMap[k] = v
 	}
 	dest.BucketId = b.id
-	// 其实在Stable MB生成时即可以进行移除了，这里是慢一拍的操作，不过没有大问题 
+	// 其实在Stable MB生成时即可以进行移除了，这里是慢一拍的操作，不过没有大问题
 	for _, mb := range payload.MicroblockList {
 		for _, req := range mb.Txns {
 			b.removeNoLock(req)

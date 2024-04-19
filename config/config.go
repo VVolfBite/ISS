@@ -51,8 +51,8 @@ type configuration struct {
 	Orderer           string `yaml:"Orderer"`
 	Manager           string `yaml:"Manager"`
 	Checkpointer      string `yaml:"Checkpointer"`
-	Failures     	  int    `yaml:"Failures"`
-	CrashTiming  	  string `yaml:"CrashTiming"`
+	Failures          int    `yaml:"Failures"`
+	CrashTiming       string `yaml:"CrashTiming"`
 	RandomSeed        int64  `yaml:"RandomSeed"`
 	NodeToLeaderRatio int    `yaml:"NodeToLeaderRatio"`
 
@@ -107,6 +107,23 @@ type configuration struct {
 	RequestHandlerThreads     int    `yaml:"RequestHandlerThreads"` // Number of threads that write incoming requests to request Buffers.
 	RequestInputChannelBuffer int    `yaml:"RequestInputChannelBuffer"`
 	BatchVerifier             string `yaml:"BatchVerifier"`
+
+	//MicroBlock
+	// 一个池子中存储的MB上限：无用
+	PoolBSize int `yaml:"PoolBSize"`
+	// 一个池子中存储的Byte上限，这是一个关键的参数，决定了默认情况下切块MicroBlock的大小
+	PoolMSize int `yaml:"PoolMSize"`
+	// 一个池子总Txn数量上限
+	PoolMemSize int `yaml:"PoolMemSize"`
+	// 参数决定了形成StableMicroBlock所需的ACK数量，数量越多，在召回时概率越大
+	PoolStableThreshhold int `yaml:"PoolStableThreshhold"`
+
+
+	// Unbalance
+	EnableHotSpot bool `yaml:"EnableHotSpot"`
+
+	// SendingPort
+	// SendingPort int `yaml:"SendingPort"`
 }
 
 func LoadFile(configFileName string) {

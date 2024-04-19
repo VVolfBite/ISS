@@ -16,6 +16,7 @@ package messenger
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
 	"net"
 	"sort"
@@ -23,6 +24,7 @@ import (
 	"sync"
 	"time"
 
+	// "github.com/golang/protobuf/proto"
 	"github.com/hyperledger-labs/mirbft/config"
 	"github.com/hyperledger-labs/mirbft/membership"
 	"github.com/hyperledger-labs/mirbft/tracing"
@@ -41,6 +43,7 @@ const (
 )
 
 // Simulated Crash Flag. It is set true if the peer is supposed to have crashed.
+var sendBytes uint64;
 var Crashed = false
 
 // Channels holding protocol messages to be sent to nodes, indexed by destination node ID.
@@ -198,7 +201,7 @@ func Start(wg *sync.WaitGroup) {
 	if err != nil {
 		logger.Fatal().Msg("Failed to start messenger server.")
 	}
-
+	
 	// TODO: Implement graceful shutdown.
 }
 
@@ -271,23 +274,35 @@ func Connect() {
 // also must not be called concurrently with EnqueuePriorityMessage with the same destNodeID.
 // 向节点destodeId发送信息msg，显然是节点最外层的发送信息方法
 func EnqueueMsg(msg *pb.ProtocolMessage, destNodeID int32) {
+	time.Sleep(10 * time.Millisecond)
 	mu.Lock()
 	defer mu.Unlock()
 	// WARNING: If a simulate crash, the peer ignores all messages
 	if Crashed {
 		return
 	}
-	switch m := msg.Msg.(type) {
-	
-	case *pb.ProtocolMessage_MissingMicroblockRequest:
-		preprepare := m.MissingMicroblockRequest
-		logger.Info().Int32("SenderId", msg.SenderId).Int32("Sn", msg.Sn).Interface("MissingMicroblockRequest", preprepare).Msg("PBFT MissingMicroblockRequest message")
-	default:
-	}
+
+    switch m := msg.Msg.(type) {
+    case *pb.ProtocolMessage_Microblock:
+        microblock := m.Microblock
+        // 记录 Txns 字段中的请求的数量和大小
+        txnsCount := len(microblock.Txns)
+        txnsSize, _ := json.Marshal(microblock.Txns) // 通过 JSON 序列化获取 Txns 字段的大小
+        logger.Info().Msgf("Microblock message: Txns count: %d, Txns size: %d bytes", txnsCount, len(txnsSize))
+    default:
+    }
 
 	if peerConnections[destNodeID] == nil {
 		logger.Error().Int32("nodeID", destNodeID).Msg("Cannot enqueue message. Node not connected.")
 	} else {
+		// msgBytes, err := proto.Marshal(msg)
+        // if err != nil {
+        //     logger.Error().Err(err).Msg("Failed to marshal message.")
+        //     return
+        // }
+        // sendBytes += uint64(len(msgBytes))
+		// logger.Info().Msgf("SendBytes now up to %d",sendBytes)
+		// logger.Info().Msgf("Sending message of type: %T, size: %d bytes", msg.Msg, len(msgBytes))
 		peerConnections[destNodeID].Send(msg)
 	}
 }
@@ -301,24 +316,35 @@ func EnqueueMsg(msg *pb.ProtocolMessage, destNodeID int32) {
 // also must not be called concurrently with EnqueueMessage with the same destNodeID.
 // 向节点destodeId发送存在优先级的信息
 func EnqueuePriorityMsg(msg *pb.ProtocolMessage, destNodeID int32) {
+	time.Sleep(200 * time.Millisecond)
 	mu.Lock()
 	defer mu.Unlock()
 	// WARNING: If a simulate crash, the peer ignores all messages
 	if Crashed {
 		return
 	}
+
 	switch m := msg.Msg.(type) {
-	
-	case *pb.ProtocolMessage_MissingMicroblockRequest:
-		preprepare := m.MissingMicroblockRequest
-		logger.Info().Int32("SenderId", msg.SenderId).Int32("Sn", msg.Sn).Interface("MissingMicroblockRequest", preprepare).Msg("PBFT MissingMicroblockRequest message")
-	default:
-		
-	}
+    case *pb.ProtocolMessage_Microblock:
+        microblock := m.Microblock
+        // 记录 Txns 字段中的请求的数量和大小
+        txnsCount := len(microblock.Txns)
+        txnsSize, _ := json.Marshal(microblock.Txns) // 通过 JSON 序列化获取 Txns 字段的大小
+        logger.Info().Msgf("Microblock message: Txns count: %d, Txns size: %d bytes", txnsCount, len(txnsSize))
+    default:
+    }
 
 	if peerConnections[destNodeID] == nil {
 		logger.Error().Int32("nodeID", destNodeID).Msg("Cannot enqueue message. Node not connected.")
 	} else {
+		// msgBytes, err := proto.Marshal(msg)
+        // if err != nil {
+        //     logger.Error().Err(err).Msg("Failed to marshal message.")
+        //     return
+        // }
+        // sendBytes += uint64(len(msgBytes))
+		// logger.Info().Msgf("SendBytes now up to %d",sendBytes)
+		// logger.Info().Msgf("Sending message of type: %T, size: %d bytes", msg.Msg, len(msgBytes))
 		peerConnections[destNodeID].SendPriority(msg)
 	}
 }
@@ -340,10 +366,20 @@ func connectToPeer(nodeID int32) PeerConnection {
 	identity := membership.NodeIdentity(nodeID)
 	addrString := fmt.Sprintf("%s:%d", identity.PrivateAddr, identity.Port)
 
+	// dialer := func(address string, timeout time.Duration) (net.Conn, error) {
+	// 	localAddr, err := net.ResolveTCPAddr("tcp", fmt.Sprintf(":%d", 20000 + (11 * membership.OwnID)))
+	// 	if err != nil {
+	// 		return nil, err
+	// 	}
+	// 	dialer := &net.Dialer{LocalAddr: localAddr, Timeout: timeout}
+	// 	return dialer.Dial("tcp", address)
+	// }
+
 	// Set general gRPC dial options.
 	dialOpts := []grpc.DialOption{
 		grpc.WithBlock(),
 		grpc.WithDefaultCallOptions(grpc.MaxCallRecvMsgSize(maxMessageSize), grpc.MaxCallSendMsgSize(maxMessageSize)),
+		// grpc.WithDialer(dialer),
 	}
 
 	// Add TLS-specific gRPC dial options, depending on configuration
@@ -505,7 +541,7 @@ func createConnections(addrString string, dialOpts []grpc.DialOption, nodeID int
 // 向节点创建连接，使用远程调用对方listen，因为listen返回的是对方的发送信息池，相当于获取了响应信息
 func createConnection(addr string, dialOpts []grpc.DialOption) pb.Messenger_ListenClient {
 
-	
+	logger.Info().Msgf("Connect before to %s",addr)
 	// Set up a gRPC connection.
 	conn, err := grpc.Dial(addr, dialOpts...)
 	
@@ -527,6 +563,7 @@ func createConnection(addr string, dialOpts []grpc.DialOption) pb.Messenger_List
 	}
 
 	// Return the message sing connected to the peer.
+	logger.Info().Msgf("Connect after to %s",addr)
 	return msgSink
 }
 // 串行测试连接

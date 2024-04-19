@@ -393,6 +393,7 @@ func (c *client) sendRequests(ordererID int32, clientStub pb.Messenger_RequestCl
 
 // Submits a single client request with sequence number seqNr.
 // Blocks until the request fits in the client watermark window.
+// 这里节点创建req并抉择向哪些节点发送，我们在这里想办法配置倾斜比重
 func (c *client) submitRequest(seqNr int32) {
 
 	var req *pb.ClientRequest = nil
@@ -421,6 +422,21 @@ func (c *client) submitRequest(seqNr int32) {
 	} else {
 		destIDs = membership.AllNodeIDs()
 	}
+	c.log.Info().
+	Int32("clSeqNr", req.RequestId.ClientSn).
+	Interface("dest", destIDs).
+	Msg("Submitting Request.")
+	
+	// if config.Config.EnableHotSpot {
+	// 	// 只选择destIDs中编号最小的一个节点
+	// 	minID := destIDs[0]
+	// 	for _, id := range destIDs {
+	// 		if id < minID {
+	// 			minID = id
+	// 		}
+	// 	}
+	// 	destIDs = []int32{minID}
+	// }
 
 	// Initialize request-related data structures.
 	c.requests[seqNr] = req // for the case where requests are not precomputed. otherwise not necessary.
@@ -442,8 +458,6 @@ func (c *client) submitRequest(seqNr int32) {
 			c.log.Warn().Int32("ordererId", ordererID).Msg("Not sending request to orderer. No connection established.")
 		}
 	}
-
-	c.log.Debug().Int32("clSeqNr", req.RequestId.ClientSn).Msg("Submitted request.")
 }
 
 // Starts response handler threads, one per orderer.
@@ -581,7 +595,7 @@ func (c *client) registerBucketAssignment(assignment *pb.BucketAssignment) {
 		c.currentBucketAssignment = make(map[int]int32)
 		c.maxBucketID = 0
 		for peerID, bucketList := range newAssignment.Buckets {
-			c.log.Debug().Int32("orderer", peerID).Interface("buckets", bucketList.Vals).Msg("New bucket assignment.")
+			c.log.Info().Int32("orderer", peerID).Interface("buckets", bucketList.Vals).Msg("New bucket assignment.")
 			for _, b := range bucketList.Vals {
 				c.currentBucketAssignment[int(b)] = peerID
 				if int(b) > c.maxBucketID {

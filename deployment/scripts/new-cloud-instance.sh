@@ -120,7 +120,7 @@ function wait_for_instance() {
 # Arguments passed to this function are forwarded to ibmcloud sl vs create.
 # Retries on failure until it succeeds.
 function create_instances() {
-
+  
   # Number of instances to create in this function call
   local n=$1
 

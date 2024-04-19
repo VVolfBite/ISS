@@ -262,6 +262,9 @@ func (b *FilledBatch) Message() *pb.FilledBatch {
 // @TODO 在MB下，我们还需要管Resurrect，如何将共识失败的MB还原并等待重新提议？ 总之这不是原则问题，我们姑且忽略
 // 我们把mb放回stable mb等待下一次提议
 func (b *Batch) Resurrect() {
+	if b.BucketId < 0{
+		return 
+	}
 	bucket := Buckets[b.BucketId]
 	bucket.Mutex.Lock()
 	defer bucket.Mutex.Unlock()

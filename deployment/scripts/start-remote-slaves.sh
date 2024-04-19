@@ -35,8 +35,9 @@ while [ -n "$1" ] && [ $n -gt 0 ]; do
   if [ "$slave_tag" = "$tag" ] && [ $skip -gt 0 ]; then
     skip=$((skip - 1))
   elif [ "$slave_tag" = "$tag" ]; then
+    echo "--------------------------------------------------"
     echo "Deploying slave at public IP $public_slave_ip ($instance_id) tagged $slave_tag"
-
+    echo "--------------------------------------------------"
     scripts/start-slave.sh $slave_tag $master_ip $public_slave_ip $private_slave_ip > "$exp_data_dir/ssh-$slave_tag-$public_slave_ip.log" 2>&1 &
 
     # Introduced because if too many slaves are started at the same time,

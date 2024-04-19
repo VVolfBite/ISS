@@ -24,7 +24,8 @@ const (
 func main() {
 
 	// Configure logger
-	zerolog.SetGlobalLevel(zerolog.DebugLevel)
+	zerolog.SetGlobalLevel(zerolog.TraceLevel)
+	
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnix
 	logger.Logger = logger.Output(zerolog.ConsoleWriter{Out: os.Stdout, NoColor: true})
 
@@ -33,14 +34,12 @@ func main() {
 	masterAddr := os.Args[2]
 	ownPublicIP := os.Args[3]
 	ownPrivateIP := os.Args[4]
-
 	// Set up a GRPC connection.
 	conn, err := grpc.Dial(masterAddr, grpc.WithInsecure(), grpc.WithBlock())
 	if err != nil {
 		logger.Fatal().Str("masterAddr", masterAddr).Msg("Could not connect to master server.")
 	}
 	defer conn.Close()
-
 	// Register client stub.
 	client := pb.NewDiscoveryClient(conn)
 
@@ -140,6 +139,13 @@ cmdLoop:
 					exitMessage = "OK"
 					exitStatus = 0
 				}
+
+				// tc特殊情况
+				// if (cmd.ExecStart.Name == "tc"){
+				// 	logger.Info().Msg("Ignoring tc failed")
+				// 	exitMessage = "OK"
+				// 	exitStatus = 0
+				// }
 			}
 
 		// Wait for program running in the background to finish.

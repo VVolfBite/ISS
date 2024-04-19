@@ -22,15 +22,15 @@ echo "Killing everything that is alive and pruning state on the remote machines 
 
 for ip in $(cat $instance_info_file | awk '{print $2}'); do
   # the grep -v \$\$ prevents the script from killing itself
-  ssh $ssh_options root@$ip "kill -9 \$(ps -ef | grep 'analyze-continuously' | grep -v \$\$ | awk '{print \$2}')" &
+  ssh $ssh_options_deploymachine root@$ip "kill -9 \$(ps -ef | grep 'analyze-continuously' | grep -v \$\$ | awk '{print \$2}')" &
   sleep 0.1 # Opening too many SSH connections at once makes some of them fail (keeping many open is OK, however).
 done
 wait
 
 echo -e "\nKilled continuous analysis scripts.\n"
-
 for ip in $(cat $instance_info_file | awk '{print $2}'); do
-  ssh $ssh_options root@$ip "
+  echo "Clearing the ins($ip)"
+  ssh $ssh_options_deploymachine root@$ip "
     tc qdisc del dev eth0 root tbf rate 1gbit burst 320kbit latency 400ms
     killall -9 discoverymaster discoveryslave orderingpeer orderingclient scp rsync
     rm -rf $remote_delete_files
@@ -47,7 +47,14 @@ echo -e "\n Reset machine state.\n"
 scripts/start-master.sh "$exp_data_dir" "$master_ip" &
 
 # Start slaves according to schedule
+# echo "----------------------------------------"
+# echo "Experiment Data Directory: $exp_data_dir"
+# echo "Instance Information File: $instance_info_file"
+# echo "Master IP Address: $master_ip"
+# echo "Deploy Schedule: $deploy_schedule"
+
 scripts/deploy-slaves-remote.sh "$exp_data_dir" "$instance_info_file" "$master_ip" $deploy_schedule &
+wait 
 
 # Start result fetching in the background.
 scripts/fetch-results.sh $master_ip "$exp_data_dir" > $exp_data_dir/$local_result_fetching_log 2>&1 &

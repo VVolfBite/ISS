@@ -53,7 +53,7 @@ peerTag="peers"
 faultyPeerTag="faultyPeers"
 minConcurrentRequests=$((256 * 16384)) # Based on empirical data. At saturation, makes the throughput-latency plot nicely go up (as it is equivalent to may concurrent clients).
 requestBufferSizes="8192"
-requestHandlerThreadNums="32"
+requestHandlerThreadNums="16"
 messageBatchRates="4"       # (in msgs/ms) The number of peers divided by this number gives the message batch timeout in ms
 hardRateLimits="false"
 earlyRequestVerification="false"
@@ -68,7 +68,7 @@ checkpointers="Signing"
 # Parameters chosen for experiments
 durations="30"             # [s]   !!! Don't forget to change the timeout in generate-master-commands.py if increasing this value !!!
 bandwidths="1gbit"         # any value accepted by the tc command or "unlimited" !!! ATTENTION: Adapt MaxProposeDataRate in config accordingly !!!
-payloadSizes="500"         # [Bytes]
+payloadSizes="2000"         # [Bytes]
 fixedEpochLength=false
 auths="true"
 bucketsPerLeader="4"
@@ -76,7 +76,7 @@ minBuckets="4"
 minEpochLength="256"       # [entries]
 nodeConnections="1"
 minConnections="16"
-leaderPolicies="Simple Single"  # Possible values:
+leaderPolicies="Single"  # Possible values:
                          #     "Single": only one node in the leaderset. Simulates the single leader version of the protocols.
                          #     "Simple": all nodes in the leaderset
                          #     "Blacklist": faulty nodes are blacklisted, at least 2f+1 nodes in the leaderset
@@ -90,14 +90,22 @@ crashTimings="EpochStart" # Possible values:
 singleLeaderEpoch=$minEpochLength
 
 # Parameters to tune:
-batchsizes="4096"           # [requests]
-batchrates="32"             # [batches/s]
+batchsizes="512"           # [requests]
+batchrates="8"             # [batches/s]
 minBatchTimeout="1000"      # [ms]
 maxBatchTimeout="4000"      # [ms]
 segmentLengths="16"         # [entries]
 viewChangeTimeouts="60000"  # [ms]
 nodeToLeaderRatios="1"      # How many nodes are initally leaders, set to 1 to have initially all nodes in the leaderset
 
+# MicroBlock 
+poolBSizes="2"
+poolMSizes="512"
+poolMemSizes="5000"
+poolStableThreshholds="2"
+
+# Unbalance
+EnableHotSpot=false
 # batctimeout = minBatchTimeout, if maxLeaders/batchrate < minBatchTimeout
 #               maxBatchTimeout, if maxLeaders/batchrate > maxBatchTimeout
 #               numleaders/batchrate, otherwise
@@ -110,8 +118,8 @@ function skip() {
 }
 
 throughputsAuthPbft=$()
-throughputsAuthPbft[4]="128 256"
-throughputsAuthPbft[8]=""
+throughputsAuthPbft[4]="2048"
+throughputsAuthPbft[8]="2048"
 throughputsAuthPbft[16]=""
 throughputsAuthPbft[32]=""
 throughputsAuthPbft[64]=""
@@ -124,23 +132,23 @@ throughputsNoAuthPbft[32]=""
 throughputsNoAuthPbft[64]=""
 throughputsNoAuthPbft[128]=""
 throughputsAuthSinglePbft=$()
-throughputsAuthSinglePbft[4]="128 256"
-throughputsAuthSinglePbft[8]=""
+throughputsAuthSinglePbft[4]="2048"
+throughputsAuthSinglePbft[8]="2048"
 throughputsAuthSinglePbft[16]=""
 throughputsAuthSinglePbft[32]=""
 throughputsAuthSinglePbft[64]=""
 throughputsAuthSinglePbft[128]=""
 throughputsNoAuthSinglePbft=$()
 throughputsNoAuthSinglePbft[4]=""
-throughputsNoAuthSinglePbft[8]=""
+throughputsNoAuthSinglePbft[8]="2048"
 throughputsNoAuthSinglePbft[16]=""
 throughputsNoAuthSinglePbft[32]=""
 throughputsNoAuthSinglePbft[64]=""
 throughputsNoAuthSinglePbft[128]=""
 
 throughputsAuthHotStuff=$()
-throughputsAuthHotStuff[4]="128 256"
-throughputsAuthHotStuff[8]=""
+throughputsAuthHotStuff[4]="2048"
+throughputsAuthHotStuff[8]="2048"
 throughputsAuthHotStuff[16]=""
 throughputsAuthHotStuff[32]=""
 throughputsAuthHotStuff[64]=""
@@ -153,8 +161,8 @@ throughputsNoAuthHotStuff[32]=""
 throughputsNoAuthHotStuff[64]=""
 throughputsNoAuthHotStuff[128]=""
 throughputsAuthSingleHotStuff=$()
-throughputsAuthSingleHotStuff[4]="128 256"
-throughputsAuthSingleHotStuff[8]=""
+throughputsAuthSingleHotStuff[4]="2048"
+throughputsAuthSingleHotStuff[8]="2048"
 throughputsAuthSingleHotStuff[16]=""
 throughputsAuthSingleHotStuff[32]=""
 throughputsAuthSingleHotStuff[64]=""
@@ -168,22 +176,22 @@ throughputsNoAuthSingleHotStuff[64]=""
 throughputsNoAuthSingleHotStuff[128]=""
 
 throughputsAuthRaft=$()
-throughputsAuthRaft[4]="128 256"
-throughputsAuthRaft[8]=""
+throughputsAuthRaft[4]="2048"
+throughputsAuthRaft[8]="2048"
 throughputsAuthRaft[16]=""
 throughputsAuthRaft[32]=""
 throughputsAuthRaft[64]=""
 throughputsAuthRaft[128]=""
 throughputsNoAuthRaft=$()
 throughputsNoAuthRaft[4]=""
-throughputsNoAuthRaft[8]=""
+throughputsNoAuthRaft[8]="2048"
 throughputsNoAuthRaft[16]=""
 throughputsNoAuthRaft[32]=""
 throughputsNoAuthRaft[64]=""
 throughputsNoAuthRaft[128]=""
 throughputsAuthSingleRaft=$()
-throughputsAuthSingleRaft[4]="128 256"
-throughputsAuthSingleRaft[8]=""
+throughputsAuthSingleRaft[4]="2048"
+throughputsAuthSingleRaft[8]="2048"
 throughputsAuthSingleRaft[16]=""
 throughputsAuthSingleRaft[32]=""
 throughputsAuthSingleRaft[64]=""
@@ -274,15 +282,16 @@ dplLines() {
     echo -e "\n" >> $deployment_file
 }
 
-
+# 这里实际生成Config文件
 config() {
-  cat config-file-templates/mir-modular.yml | sed "s/LOGGINGLEVEL/$loggingLevel/ ; s/ORDERER/$orderer/ ; s/CHECKPOINTER/$cpt/ ; s/FAILURES/$numFailures/ ; s/PRIORITYCONNECTIONS/$numConnections/ ; s/VIEWCHANGETIMEOUT/$viewChangeTimeout/ ; s/CRASHTIMING/$crashTiming/ ; s/LEADERPOLICY/$leaderPolicy/ ; s/EPOCH/$epoch/ ; s/SEGMENTLENGTH/$segmentLength/ ; s/WATERMARK/$watermark/ ; s/BUCKETS/$numBuckets/ ; s/BATCHSIZE/$batchsize/ ; s/PAYLOAD/$payloadSize/ ; s/BATCHTIMEOUT/$batchtimeout/ ; s/THROUGHPUTCAP/$throughputCap/ ; s/MSGBATCHPERIOD/$msgBatchPeriod/ ; s/CLIENTS/$instances/ ; s/REQUESTS/$requests/ ; s/DURATION/$((duration * 1000))/ ; s/REQUESTRATE/$rate/ ; s/HARDRATELIMIT/$hardRateLimit/ ; s/BATCHVERIFIER/$batchVerifier/ ; s/REQUESTHANDLERTHREADS/$requestHandlers/ ; s/REQUESTINPUTBUFFER/$requestBufferSize/ ; s/AUTH/$auth/ ; s/VERIFYEARLY/$verifyEarly/ ; s/RANDOMSEED/$randomNumber/ ; s/FAULTY/false/ ; s/NLR/$nlr/" > $exp_data_dir/config/config-$exp.yml
-  cat config-file-templates/mir-modular.yml | sed "s/LOGGINGLEVEL/$loggingLevel/ ; s/ORDERER/$orderer/ ; s/CHECKPOINTER/$cpt/ ; s/FAILURES/$numFailures/ ; s/PRIORITYCONNECTIONS/$numConnections/ ; s/VIEWCHANGETIMEOUT/$viewChangeTimeout/ ; s/CRASHTIMING/$crashTiming/ ; s/LEADERPOLICY/$leaderPolicy/ ; s/EPOCH/$epoch/ ; s/SEGMENTLENGTH/$segmentLength/ ; s/WATERMARK/$watermark/ ; s/BUCKETS/$numBuckets/ ; s/BATCHSIZE/$batchsize/ ; s/PAYLOAD/$payloadSize/ ; s/BATCHTIMEOUT/$batchtimeout/ ; s/THROUGHPUTCAP/$throughputCap/ ; s/MSGBATCHPERIOD/$msgBatchPeriod/ ; s/CLIENTS/$instances/ ; s/REQUESTS/$requests/ ; s/DURATION/$((duration * 1000))/ ; s/REQUESTRATE/$rate/ ; s/HARDRATELIMIT/$hardRateLimit/ ; s/BATCHVERIFIER/$batchVerifier/ ; s/REQUESTHANDLERTHREADS/$requestHandlers/ ; s/REQUESTINPUTBUFFER/$requestBufferSize/ ; s/AUTH/$auth/ ; s/VERIFYEARLY/$verifyEarly/ ; s/RANDOMSEED/$randomNumber/ ; s/FAULTY/true/ ; s/NLR/$nlr/" > $exp_data_dir/config/config-$exp-faulty.yml
+  cat config-file-templates/mir-modular.yml | sed "s/LOGGINGLEVEL/$loggingLevel/ ; s/ORDERER/$orderer/ ; s/CHECKPOINTER/$cpt/ ; s/FAILURES/$numFailures/ ; s/PRIORITYCONNECTIONS/$numConnections/ ; s/VIEWCHANGETIMEOUT/$viewChangeTimeout/ ; s/CRASHTIMING/$crashTiming/ ; s/LEADERPOLICY/$leaderPolicy/ ; s/EPOCH/$epoch/ ; s/SEGMENTLENGTH/$segmentLength/ ; s/WATERMARK/$watermark/ ; s/BUCKETS/$numBuckets/ ; s/BATCHSIZE/$batchsize/ ; s/PAYLOAD/$payloadSize/ ; s/BATCHTIMEOUT/$batchtimeout/ ; s/THROUGHPUTCAP/$throughputCap/ ; s/MSGBATCHPERIOD/$msgBatchPeriod/ ; s/CLIENTS/$instances/ ; s/REQUESTS/$requests/ ; s/DURATION/$((duration * 1000))/ ; s/REQUESTRATE/$rate/ ; s/HARDRATELIMIT/$hardRateLimit/ ; s/BATCHVERIFIER/$batchVerifier/ ; s/REQUESTHANDLERTHREADS/$requestHandlers/ ; s/REQUESTINPUTBUFFER/$requestBufferSize/ ; s/AUTH/$auth/ ; s/VERIFYEARLY/$verifyEarly/ ; s/RANDOMSEED/$randomNumber/ ; s/FAULTY/false/ ; s/NLR/$nlr/ ; s/POOLBSIZE/$poolBSize/ ; s/POOLMSIZE/$poolMSize/ ; s/POOLMEMSIZE/$poolMemSize/ ; s/POOLSTABLETHRESHHOLD/$poolStableThreshhold/ ; s/ENABLEHOTSPOT/$EnableHotSpot/"      > $exp_data_dir/config/config-$exp.yml
+  cat config-file-templates/mir-modular.yml | sed "s/LOGGINGLEVEL/$loggingLevel/ ; s/ORDERER/$orderer/ ; s/CHECKPOINTER/$cpt/ ; s/FAILURES/$numFailures/ ; s/PRIORITYCONNECTIONS/$numConnections/ ; s/VIEWCHANGETIMEOUT/$viewChangeTimeout/ ; s/CRASHTIMING/$crashTiming/ ; s/LEADERPOLICY/$leaderPolicy/ ; s/EPOCH/$epoch/ ; s/SEGMENTLENGTH/$segmentLength/ ; s/WATERMARK/$watermark/ ; s/BUCKETS/$numBuckets/ ; s/BATCHSIZE/$batchsize/ ; s/PAYLOAD/$payloadSize/ ; s/BATCHTIMEOUT/$batchtimeout/ ; s/THROUGHPUTCAP/$throughputCap/ ; s/MSGBATCHPERIOD/$msgBatchPeriod/ ; s/CLIENTS/$instances/ ; s/REQUESTS/$requests/ ; s/DURATION/$((duration * 1000))/ ; s/REQUESTRATE/$rate/ ; s/HARDRATELIMIT/$hardRateLimit/ ; s/BATCHVERIFIER/$batchVerifier/ ; s/REQUESTHANDLERTHREADS/$requestHandlers/ ; s/REQUESTINPUTBUFFER/$requestBufferSize/ ; s/AUTH/$auth/ ; s/VERIFYEARLY/$verifyEarly/ ; s/RANDOMSEED/$randomNumber/ ; s/FAULTY/true/ ; s/NLR/$nlr/ ; s/POOLBSIZE/$poolBSize/ ; s/POOLMSIZE/$poolMSize/ ; s/POOLMEMSIZE/$poolMemSize/ ; s/POOLSTABLETHRESHHOLD/$poolStableThreshhold/ ; s/ENABLEHOTSPOT/$EnableHotSpot/"   > $exp_data_dir/config/config-$exp-faulty.yml
 }
 
 csvLine() {
     echo "$exp,$numPeers,$nlr,$numFailures,$crashTiming,$viewChangeTimeout,$numLocations,$bandwidth,$numConnections,$orderer,$machines,$instances,$totalclients,$segmentLength,$leaderPolicy,$epoch,$batchsize,$batchtimeout,$batchrate,$msgBatchPeriod,$numBuckets,$leaderBuckets,$auth,$verifyEarly,$throughputCap,$thr,$rate,$hardRateLimit,$requests,$watermark,$batchVerifier,$requestHandlers,$requestBufferSize" >> $csv_file
 }
+
 
 generate() {
     exp=$(printf "%0${exp_id_digits}d" $exp_id)
@@ -394,92 +403,99 @@ function generateCombinations() {
                                         for orderer in $orderers; do
                                           for cpt in $checkpointers; do
                                             for auth in $auths; do
-                                              epoch=$((segmentLength * numPeers))
+                                              for poolBSize in $poolBSizes; do
+                                                for poolMSize in $poolMSizes; do
+                                                  for poolMemSize in $poolMemSizes; do
+                                                    for poolStableThreshhold in $poolStableThreshholds; do
+                                                      epoch=$((segmentLength * numPeers))
+                                                      if [ $epoch -lt $minEpochLength ]; then
+                                                        epoch=$minEpochLength
+                                                        segmentLength=$((epoch / numPeers))
+                                                      fi
 
-                                              if [ $epoch -lt $minEpochLength ]; then
-                                                epoch=$minEpochLength
-                                                segmentLength=$((epoch / numPeers))
-                                              fi
+                                                      if $fixedEpochLength; then
+                                                        segmentLength=0
+                                                      fi
 
-                                              if $fixedEpochLength; then
-                                                segmentLength=0
-                                              fi
+                                                      if [ $numFailures -gt 0 ]; then
+                                                        leaderPolicy="$leaderPolicyWithFaults"
+                                                      fi
 
-                                              if [ $numFailures -gt 0 ]; then
-                                                leaderPolicy="$leaderPolicyWithFaults"
-                                              fi
+                                                      if [ $leaderPolicy = "Single" ]; then
+                                                        segmentLength=$singleLeaderEpoch
+                                                        epoch=$singleLeaderEpoch
+                                                        msgBatchPeriod=$((4 / msgBatchRate)) # Msg batch rate as if there were only 4 peers.
+                                                        numBuckets=$bucketsPerLeader
+                                                      fi
 
-                                              if [ $leaderPolicy = "Single" ]; then
-                                                segmentLength=$singleLeaderEpoch
-                                                epoch=$singleLeaderEpoch
-                                                msgBatchPeriod=$((4 / msgBatchRate)) # Msg batch rate as if there were only 4 peers.
-                                                numBuckets=$bucketsPerLeader
-                                              fi
+                                                      # Make sure the minimal number of connections of a peer is reached.
+                                                      while [ $((numConnections * numPeers)) -lt $minConnections ]; do
+                                                        numConnections=$((numConnections + 1))
+                                                      done
 
-                                              # Make sure the minimal number of connections of a peer is reached.
-                                              while [ $((numConnections * numPeers)) -lt $minConnections ]; do
-                                                numConnections=$((numConnections + 1))
-                                              done
-
-                                              if [ "$auth" = "true" ]; then
-                                                for verifyEarly in $earlyRequestVerification; do
-                                                  if [ "$orderer" = "Pbft" ]; then
-                                                    if [ $leaderPolicy = "Single" ]; then
-                                                      throughputs=${throughputsAuthSinglePbft[$numPeers]}
-                                                    else
-                                                      throughputs=${throughputsAuthPbft[$numPeers]}
-                                                    fi
-                                                  elif [ $orderer = "HotStuff" ]; then
-                                                    if [ $leaderPolicy = "Single" ]; then
-                                                      throughputs=${throughputsAuthSingleHotStuff[$numPeers]}
-                                                    else
-                                                      throughputs=${throughputsAuthHotStuff[$numPeers]}
-                                                    fi
-                                                  elif [ $orderer = "Raft" ]; then
-                                                    if [ $leaderPolicy = "Single" ]; then
-                                                      throughputs=${throughputsAuthSingleRaft[$numPeers]}
-                                                    else
-                                                      throughputs=${throughputsAuthRaft[$numPeers]}
-                                                    fi
-                                                  fi
-                                                  for thr in $throughputs; do
-                                                    if ! skip; then
-                                                      $(generate)
-                                                      (( exp_id += 1 ))
-                                                    fi
+                                                      if [ "$auth" = "true" ]; then
+                                                        for verifyEarly in $earlyRequestVerification; do
+                                                          if [ "$orderer" = "Pbft" ]; then
+                                                            if [ $leaderPolicy = "Single" ]; then
+                                                              throughputs=${throughputsAuthSinglePbft[$numPeers]}
+                                                            else
+                                                              throughputs=${throughputsAuthPbft[$numPeers]}
+                                                            fi
+                                                          elif [ $orderer = "HotStuff" ]; then
+                                                            if [ $leaderPolicy = "Single" ]; then
+                                                              throughputs=${throughputsAuthSingleHotStuff[$numPeers]}
+                                                            else
+                                                              throughputs=${throughputsAuthHotStuff[$numPeers]}
+                                                            fi
+                                                          elif [ $orderer = "Raft" ]; then
+                                                            if [ $leaderPolicy = "Single" ]; then
+                                                              throughputs=${throughputsAuthSingleRaft[$numPeers]}
+                                                            else
+                                                              throughputs=${throughputsAuthRaft[$numPeers]}
+                                                            fi
+                                                          fi
+                                                          for thr in $throughputs; do
+                                                            if ! skip; then
+                                                              $(generate)
+                                                              (( exp_id += 1 ))
+                                                            fi
+                                                          done
+                                                        done
+                                                      elif [ "$auth" = "false" ]; then
+                                                        verifyEarly="false"
+                                                        if [ "$orderer" = "Pbft" ]; then
+                                                          if [ $leaderPolicy = "Single" ]; then
+                                                            throughputs=${throughputsNoAuthSinglePbft[$numPeers]}
+                                                          else
+                                                            throughputs=${throughputsNoAuthPbft[$numPeers]}
+                                                          fi
+                                                        elif [ $orderer = "HotStuff" ]; then
+                                                          if [ $leaderPolicy = "Single" ]; then
+                                                            throughputs=${throughputsNoAuthSingleHotStuff[$numPeers]}
+                                                          else
+                                                            throughputs=${throughputsNoAuthHotStuff[$numPeers]}
+                                                          fi
+                                                        elif [ $orderer = "Raft" ]; then
+                                                          if [ $leaderPolicy = "Single" ]; then
+                                                            throughputs=${throughputsNoAuthSingleRaft[$numPeers]}
+                                                          else
+                                                            throughputs=${throughputsNoAuthRaft[$numPeers]}
+                                                          fi
+                                                        fi
+                                                        for thr in $throughputs; do
+                                                          if ! skip; then
+                                                            $(generate)
+                                                            (( exp_id += 1 ))
+                                                          fi
+                                                        done
+                                                      else
+                                                        >&2 echo "Valid values for auth are 'true' and 'false'. Received: $auth"
+                                                        exit 2
+                                                      fi
                                                   done
                                                 done
-                                              elif [ "$auth" = "false" ]; then
-                                                verifyEarly="false"
-                                                if [ "$orderer" = "Pbft" ]; then
-                                                  if [ $leaderPolicy = "Single" ]; then
-                                                    throughputs=${throughputsNoAuthSinglePbft[$numPeers]}
-                                                  else
-                                                    throughputs=${throughputsNoAuthPbft[$numPeers]}
-                                                  fi
-                                                elif [ $orderer = "HotStuff" ]; then
-                                                  if [ $leaderPolicy = "Single" ]; then
-                                                    throughputs=${throughputsNoAuthSingleHotStuff[$numPeers]}
-                                                  else
-                                                    throughputs=${throughputsNoAuthHotStuff[$numPeers]}
-                                                  fi
-                                                elif [ $orderer = "Raft" ]; then
-                                                  if [ $leaderPolicy = "Single" ]; then
-                                                    throughputs=${throughputsNoAuthSingleRaft[$numPeers]}
-                                                  else
-                                                    throughputs=${throughputsNoAuthRaft[$numPeers]}
-                                                  fi
-                                                fi
-                                                for thr in $throughputs; do
-                                                  if ! skip; then
-                                                    $(generate)
-                                                    (( exp_id += 1 ))
-                                                  fi
-                                                done
-                                              else
-                                                >&2 echo "Valid values for auth are 'true' and 'false'. Received: $auth"
-                                                exit 2
-                                              fi
+                                              done
+                                            done         
                                           done
                                         done
                                       done
@@ -537,6 +553,7 @@ else
 fi
 
 
+
 # Generate header of the deployment file.
 {
   echo "# Generated deployment file"
@@ -574,13 +591,14 @@ fi
   echo ""
 } > $deployment_file
 
-
 # Generate CSV file header.
 echo "exp,peers,nlr,failures,crash-timing,vctimeout,datacenters,bandwidth,num-connections,orderer,clients,instances,client-threads,segment,leader-policy,epoch,batchsize,batchtimeout,batchrate,msgbatchperiod,buckets,leader-buckets,authentication,verify-early,throughput-cap,target-throughput,rate-per-client,hard-rate-limit,requests,cl-watermarks,batch-verifier,request-handlers,req-buffer-size" > $csv_file
 echo -e "\n# Parameters: exp,peers,nlr,failures,crash-timing,vctimeout,datacenters,bandwidth,num-connections,orderer,clients,instances,client-threads,leader-policy,segment,epoch,batchsize,batchtimeout,batchrate,msgbatchperiod,buckets,leader-buckets,authentication,verify-early,throughput-cap,target-throughput,rate-per-client,hard-rate-limit,requests,cl-watermarks,batch-verifier,request-handlers,req-buffer-size\n" >> $deployment_file
 
 deployedCorrect=0
 deployedFaulty=0
+
+# Generating config here : generateCombinations
 for numPeers in $systemSizes; do
 
   randomNumber=$RANDOM # Keep the same random seed for a whole set of experiments to be able to compare the runs.
@@ -611,10 +629,11 @@ for numPeers in $systemSizes; do
   echo ""
   } >> $deployment_file
 
+
   machines=1
   clientTags="1client"
   generateCombinations "$clients1"
-
+  # read -p "Press Enter to continue..."
   machines=16
   clientTags="16clients"
   generateCombinations "$clients16"

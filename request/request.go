@@ -16,10 +16,7 @@ package request
 
 import (
 	"encoding/binary"
-	"math/rand"
 	"sync"
-	"time"
-
 	"github.com/hyperledger-labs/mirbft/config"
 	"github.com/hyperledger-labs/mirbft/crypto"
 	"github.com/hyperledger-labs/mirbft/membership"
@@ -67,6 +64,11 @@ var (
 	IsBusy          bool                         // 用于负载均衡的检测
 	mu              sync.Mutex                   // 保护线程安全所需要的锁
 
+	LoadBusyStatus		bool
+	LoadQueue 		[]int64
+	LoadMutex 		sync.Mutex
+
+
 )
 
 type watermarkRange struct {
@@ -89,6 +91,7 @@ func Init() {
 	for i := range Buckets {
 		Buckets[i] = NewBucket(i)
 	}
+	LoadQueue = make([]int64, 10)
 
 	// Initialize request handler goroutines.
 	// These threads are reading incoming requests from (buffered) input channels and putting them in Buffers / Buckets.
@@ -215,12 +218,12 @@ func Add(req *Request) *Request {
 		return nil
 	}
 	// 我们在这里模拟忙状态
-	if !IsBusy {
-		rand.Seed(time.Now().UnixNano())
-		randomNumber := rand.Intn(100)
-		IsBusy = randomNumber < 2
-		logger.Info().Msgf("Setting is busy to %t", IsBusy)
-	}
+	// if !IsBusy {
+	// 	rand.Seed(time.Now().UnixNano())
+	// 	randomNumber := rand.Intn(100)
+	// 	IsBusy = randomNumber < 2
+	// 	logger.Info().Msgf("Setting is busy to %t", IsBusy)
+	// }
 	
 
 	// If Request is within the client watermark window, try looking it up in its bucket.
@@ -390,7 +393,7 @@ func Digest(req *pb.ClientRequest) []byte {
 }
 
 func RequestIDToBytes(req *pb.ClientRequest) []byte {
-	buffer := make([]byte, 0, 0)
+	buffer := make([]byte, 0)
 	sn := make([]byte, 4)
 	binary.LittleEndian.PutUint32(sn, uint32(req.RequestId.ClientSn))
 	buffer = append(buffer, sn...)
@@ -398,4 +401,31 @@ func RequestIDToBytes(req *pb.ClientRequest) []byte {
 	binary.LittleEndian.PutUint32(id, uint32(req.RequestId.ClientId))
 	buffer = append(buffer, id...)
 	return buffer
+}
+
+
+func UpdateLoadStatus(timestamp int64) {
+	LoadMutex.Lock()
+	defer LoadMutex.Unlock()
+	LoadQueue = append(LoadQueue, timestamp)
+	if len(LoadQueue) > 10 {
+		LoadQueue = LoadQueue[1:]
+	}
+	queueLength := len(LoadQueue)
+	if queueLength < 2 {
+		LoadBusyStatus = false // 如果队列长度小于2，则默认为非繁忙状态
+		return
+	}
+	lastTimestamp := LoadQueue[queueLength-1]
+	firstTimestamp := LoadQueue[0]
+	timeSpan := lastTimestamp - firstTimestamp
+
+	// 计算负载指标
+	loadIndicator := float64(queueLength) / float64(timeSpan)
+	if loadIndicator > 10 {
+		LoadBusyStatus = true
+	} else {
+		LoadBusyStatus = false
+	}
+	logger.Info().Msgf("Sampling rate is %f / s",loadIndicator)
 }

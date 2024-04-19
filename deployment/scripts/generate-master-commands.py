@@ -52,7 +52,7 @@ def pushConfigFiles(expID, slaves):
     output("# Push config files.")
     for s, configFile in slaves.items():
         output(
-            "exec-start {0} scp-output-{1}-config.log stubborn-scp.sh {5} -i $ssh_key_file $own_public_ip:{2}/{3} {4}"
+            "exec-start {0} scp-output-{1}-config.log scp -i $ssh_key_file $own_public_ip:{2}/{3} {4}"
             "".format(s, expID, MASTER_CONFIG_DIR, configFile, SLAVE_CONFIG_FILE, SCP_RETRY_COUNT)
         )
         output("exec-wait {0} 60000 "
@@ -288,7 +288,7 @@ def submitLogs(expID, slaves):
                "exec-wait {0} 2000".format(s, expID))
     for s in slaves:
         output(
-            "exec-start {0} scp-output-{1}-logs.log stubborn-scp.sh {2} -i $ssh_key_file "
+            "exec-start {0} scp-output-{1}-logs.log scp -i $ssh_key_file "
             "experiment-output-{1}-slave-__id__.tar.gz $own_public_ip:{3}/raw-results/".format(s, expID, SCP_RETRY_COUNT, MASTER_EXP_DIR))
         output("exec-wait {0} 60000 "
                "exec-start {0} experiment-output/{1}/slave-__id__/FAILED echo Could not submit logs; "

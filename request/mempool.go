@@ -2,10 +2,11 @@ package request
 
 import (
 	"container/list"
+	"fmt"
 	"sync"
 	"time"
 
-	// "github.com/hyperledger-labs/mirbft/crypto"
+	"github.com/hyperledger-labs/mirbft/config"
 	"github.com/hyperledger-labs/mirbft/membership"
 	"github.com/hyperledger-labs/mirbft/messenger"
 	pb "github.com/hyperledger-labs/mirbft/protobufs"
@@ -21,31 +22,20 @@ type MemPool struct {
 	pendingMicroblocks map[util.Identifier]*PendingMicroblock // pending 是指还没有收集到足够的ack  处于等待不能用于共识的mb
 	ackBuffer          map[util.Identifier]map[int32][]byte   // ack buffer 记录了mb收集到了那些节点的ack签名
 	stableMBs          map[util.Identifier]struct{}           //stable 是指收集到了足够ack的可以用于共识了的 mb
-	bsize              int                                    // number of microblocks in a proposal
 	msize              int                                    // byte size of transactions in a microblock
-	memsize            int                                    // number of microblocks in mempool
 	currSize           int
 	threshhold         int // number of acks needed for a stable microblock
-	totalTx            int64
 	MBmu               sync.Mutex
-	Reqmu              sync.Mutex
+	ReqMutex           sync.Mutex
+	// 统计量
 }
-
-
 
 // NewMemPool creates a new mempool
 func NewMemPool(BucketId int) *MemPool {
 	mempool := &MemPool{
-		// @TODO
-		// bsize:              config.GetConfig().BSize,
-		// msize:              config.GetConfig().MSize,
-		// memsize:            config.GetConfig().MemSize,
-		// threshhold:         config.GetConfig().Q,
-		BucketId:           BucketId,
-		bsize:              2,
-		msize:              2000,
-		memsize:            3000,
-		threshhold:         2,
+		msize:      config.Config.PoolMSize,
+		threshhold: config.Config.PoolStableThreshhold,
+		BucketId:   BucketId,
 		stableMicroblocks:  list.New(),
 		microblockMap:      make(map[util.Identifier]*MicroBlock),
 		pendingMicroblocks: make(map[util.Identifier]*PendingMicroblock),
@@ -60,101 +50,60 @@ func NewMemPool(BucketId int) *MemPool {
 // AddReq adds a transaction and returns a microblock if msize is reached
 // then the contained transactions should be deleted
 func (pool *MemPool) AddReq(txn *Request) (bool, *MicroBlock) {
-	pool.Reqmu.Lock()
-	defer pool.Reqmu.Unlock()
-	if pool.RemainingTx() >= int64(pool.memsize) {
-		return false, nil
-	}
-	if pool.RemainingMB() >= int64(pool.memsize) {
-		return false, nil
-	}
 
-	pool.totalTx++
-	tranSize := util.SizeOf(txn)
-	totalSize := tranSize + pool.currSize
+	pool.ReqMutex.Lock()
+	defer pool.ReqMutex.Unlock()
+	
+	pool.currSize = pool.currSize + 1
 
-	if tranSize > pool.msize {
-		return false, nil
-	}
-	if totalSize > pool.msize {
+	if pool.currSize >= pool.msize {
 		//do not add the curr trans, and generate a microBlock
 		//set the currSize to curr trans, since it is the only one does not add to the microblock
 		var id int
-		pool.currSize = tranSize
-		newBlock := NewMicroblock(id, pool.makeTxnSlice())
-		pool.txnList.PushBack(txn)
-		newBlock.Sender = membership.OwnID
-		newBlock.BucketID = pool.BucketId
-		newBlock.Timestamp = time.Now()
-		pool.AddMicroblock(newBlock)
-
-		if !IsBusy {
-			pMsg := &pb.ProtocolMessage{
-				SenderId: membership.OwnID,
-				Msg: &pb.ProtocolMessage_Microblock{
-					Microblock: ToProtoMicroBlock(newBlock),
-				},
-			}
-			for _, nodeID := range membership.AllNodeIDs() {
-				messenger.EnqueueMsg(pMsg, nodeID)
-			}
-		} else {
-			newBlock.IsForward = true
-			pMsg := &pb.ProtocolMessage{
-				SenderId: membership.OwnID,
-				Msg: &pb.ProtocolMessage_Microblock{
-					Microblock: ToProtoMicroBlock(newBlock),
-				},
-			}
-			pick := pickRandomNode()
-			logger.Debug().Msgf("[%v] is going to forward a mb to %v ,mb hash is %x", membership.OwnID, pick, newBlock.Hash)
-			messenger.EnqueueMsg(pMsg, int32(pick))
-		}
-		return true, newBlock
-
-	} else if totalSize == pool.msize {
-		//add the curr trans, and generate a microBlock
-		var id int
-		allTxn := append(pool.makeTxnSlice(), txn)
-
-		newBlock := NewMicroblock(id, allTxn)
 		pool.currSize = 0
-		newBlock.Sender = membership.OwnID
-		newBlock.BucketID = pool.BucketId
-		newBlock.Timestamp = time.Now()
-
-		pool.AddMicroblock(newBlock)
-		// 不需要 我们可以给自己加一份
-		pMsg := &pb.ProtocolMessage{
-			SenderId: membership.OwnID,
-			Msg: &pb.ProtocolMessage_Microblock{
-				Microblock: ToProtoMicroBlock(newBlock),
-			},
+		newMicroBlock := NewMicroblock(id, pool.makeTxnSlice())
+		pool.txnList.PushBack(txn)
+		newMicroBlock.Sender = membership.OwnID
+		newMicroBlock.BucketID = pool.BucketId
+		sampleTime := time.Now().Unix()
+		UpdateLoadStatus(sampleTime)
+		txnsInfo := ""
+		for _, txn := range newMicroBlock.Txns {
+			txnsInfo += fmt.Sprintf("(%v:%v) ", txn.Msg.RequestId.ClientId, txn.Msg.RequestId.ClientSn)
 		}
+		logger.Info().Msgf("Generate at bucket  %d and peer %d microblock %x containing Req:%s", pool.BucketId, membership.OwnID, newMicroBlock.Hash, txnsInfo)
+
 		if !IsBusy {
-			for _, nodeID := range membership.AllNodeIDs() {
-				messenger.EnqueueMsg(pMsg, nodeID)
-			}
-		} else {
-			newBlock.IsForward = true
 			pMsg := &pb.ProtocolMessage{
 				SenderId: membership.OwnID,
 				Msg: &pb.ProtocolMessage_Microblock{
-					Microblock: ToProtoMicroBlock(newBlock),
+					Microblock: ToProtoMicroBlock(newMicroBlock),
 				},
 			}
-			// @TODO
+			for _, nodeID := range membership.AllNodeIDs() {
+				if nodeID == membership.OwnID {
+					HandleMicroblock(newMicroBlock)
+					continue
+				}
+				messenger.EnqueueMsg(pMsg, nodeID)
+			}
+		} else {
+			newMicroBlock.IsForward = true
+			pMsg := &pb.ProtocolMessage{
+				SenderId: membership.OwnID,
+				Msg: &pb.ProtocolMessage_Microblock{
+					Microblock: ToProtoMicroBlock(newMicroBlock),
+				},
+			}
 			pick := pickRandomNode()
-			logger.Debug().Msgf("[%v] is going to forward a mb to %v , mb hash is %x", membership.OwnID, pick, newBlock.Hash)
+			logger.Debug().Msgf("Peer %v is going to forward a mb to %v ,mb hash is %x", membership.OwnID, pick, newMicroBlock.Hash)
 			messenger.EnqueueMsg(pMsg, int32(pick))
 		}
-		return true, newBlock
+		return true, newMicroBlock
 
 	} else {
 		pool.txnList.PushBack(txn)
-		pool.currSize = totalSize
 		return false, nil
-
 	}
 }
 
@@ -163,7 +112,6 @@ func (pool *MemPool) AddReq(txn *Request) (bool, *MicroBlock) {
 func (pool *MemPool) AddMicroblock(mb *MicroBlock) error {
 	pool.MBmu.Lock()
 	defer pool.MBmu.Unlock()
-
 	_, exists := pool.microblockMap[mb.Hash]
 	if exists {
 		return nil
@@ -288,6 +236,7 @@ func (pool *MemPool) CheckExistence(MBHashList [][]byte) (bool, []util.Identifie
 func (pool *MemPool) FillProposal(MBHashList [][]byte) *PendingBlock {
 	pool.MBmu.Lock()
 	defer pool.MBmu.Unlock()
+
 	existingBlocks := make([]*MicroBlock, 0)
 	missingBlocks := make(map[util.Identifier]struct{}, 0)
 	for _, id := range MBHashList {
@@ -314,22 +263,19 @@ func (pool *MemPool) FillProposal(MBHashList [][]byte) *PendingBlock {
 	return NewPendingBlock(MBHashList, missingBlocks, existingBlocks)
 }
 
+// @TODO ForceClear 会导致严重的带宽消耗，每次ForceClear都会导致为一个Req的长度的MB进行广播和共识..
+// 我们必须谨慎的进行ForceClear，并尽可能的积攒足够的Req在打包和成MB
 
-// 我们需要尽可能的移除这个线程，这是一个严重影响性能的地方
-// 本质是为了防止内存池中残留Req， 也就是在CutBatchs
-// @DONE
-func (pool *MemPool) ForceClear() {
-	pool.Reqmu.Lock()
-	defer pool.Reqmu.Unlock()
+func (pool *MemPool) ForceClear() bool {
+	pool.ReqMutex.Lock()
+	defer pool.ReqMutex.Unlock()
 	if pool.currSize > 0 {
-		logger.Info().Msg("Force clear triggered.")
 		var id int
 		allTxn := pool.makeTxnSlice()
 		newBlock := NewMicroblock(id, allTxn)
 		pool.currSize = 0
 		newBlock.Sender = membership.OwnID
 		newBlock.BucketID = pool.BucketId
-		newBlock.Timestamp = time.Now()
 		// 将新的微块添加到内存池中
 		pool.AddMicroblock(newBlock)
 		// 将新的微块发送给其他节点
@@ -340,9 +286,16 @@ func (pool *MemPool) ForceClear() {
 			},
 		}
 		for _, nodeID := range membership.AllNodeIDs() {
+			if nodeID == membership.OwnID {
+				HandleMicroblock(newBlock)
+				continue
+			}
 			messenger.EnqueueMsg(pMsg, nodeID)
 		}
+		return true
 	}
+	return false
+
 }
 
 func (pool *MemPool) IsStable(id util.Identifier) bool {
@@ -353,10 +306,6 @@ func (pool *MemPool) IsStable(id util.Identifier) bool {
 		return true
 	}
 	return false
-}
-
-func (pool *MemPool) TotalTx() int64 {
-	return pool.totalTx
 }
 
 func (pool *MemPool) RemainingTx() int64 {

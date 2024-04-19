@@ -428,7 +428,7 @@ func testBatchCutting() {
 
 	logger.Info().Int("len", bg.CountStableMicroBlock()).Msg("Bucket group created.")
 
-	batch := bg.CutBatch(1024, 10000, 0)
+	batch := bg.CutBatch(1024, 1000, 0)
 
 	logger.Info().Int("len", len(batch.MBHashList)).Msg("Batch cut")
 }

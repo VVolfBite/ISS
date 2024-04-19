@@ -12,29 +12,20 @@ import (
 	logger "github.com/rs/zerolog/log"
 )
 
+//这一部分都可以和其他handler合并
+
 func HandlePABMsg(protocolMsg *pb.ProtocolMessage) {
-	// logger.Info().Msg("PAB IN")
 	switch msg := protocolMsg.Msg.(type) {
 	case *pb.ProtocolMessage_Microblock:
-		// 接收到 Microblock 消息
-		// logger.Info().Msg("MB IN")
 		mb := msg.Microblock
-		// rand.Seed(time.Now().UnixNano())
-		// randomNumber := rand.Float64()
-		// if randomNumber < 0.01 {
-		// 	logger.Info().Msgf("Dropping")
-		// 	return
-		// }
 		HandleMicroblock(FromProtoMicroBlock(mb))
 		// ack相关内容应当在handler中处理
 	case *pb.ProtocolMessage_MicroblockAck:
 		// 接收到 Ack 消息
-		// logger.Info().Msg("ACK IN")
 		ack := msg.MicroblockAck
 		HandleAck(FromProtoAck(ack))
 	case *pb.ProtocolMessage_MissingMicroblockRequest:
 		// 接收到
-		// logger.Info().Msg("MRB IN")
 		missmbReq := msg.MissingMicroblockRequest
 		HandleMissingMicroblockRequest(FromProtoMissingMBRequest(missmbReq))
 	default:
@@ -46,39 +37,38 @@ func HandlePABMsg(protocolMsg *pb.ProtocolMessage) {
 // bucket部分还不需要实现
 
 func HandleMicroblock(mb *MicroBlock) {
-	// if mb.IsRequested{
-	// 	logger.Info().Msgf("Rece a mb %x with sn:%d",mb.Hash,mb.Sn)
-	// }
 	mu.Lock()
 	defer mu.Unlock()
-	 	
+	// 检查是否已经收到过
 	_, exist := ReceivedMBs[mb.Hash]
-
 	if exist {
+		logger.Info().Msgf("Peer %d receive a duplicate mb [%x] , ignoring ... ", membership.OwnID, mb.Hash)
 		return
 	}
+
+	// 检查是否时MBR请求，处理丢失的MBR
 	ReceivedMBs[mb.Hash] = struct{}{}
-	mb.FutureTimestamp = time.Now()
 	sn, exists := MissingMBs[mb.Hash]
 	if exists {
 		pd, exists := PendingBlockMap[sn]
-		logger.Info().Msgf("And its a missing one , a pd with %d to go",len(pd.MissingMap))
+		logger.Info().Msgf("Peer %d receive a missing mb , a pending block with %d to go", membership.OwnID, len(pd.MissingMap))
 		if exists {
 			block := pd.AddMicroblock(mb)
-			logger.Info().Msgf("Adding to pending block and still got %d to go",len(pd.MissingMap))
+			logger.Info().Msgf("Adding to pending block and still got %d to go", len(pd.MissingMap))
 			if block != nil {
 				// 不能删除这个pd，因为另外一个线程在检索这个东西
 				// delete(PendingBlockMap, sn)
-				logger.Info().Msgf("A block complete")
+				logger.Info().Msgf("A pending block complete to a block")
 				delete(MissingMBs, mb.Hash)
 			}
 		}
 	} else {
-		// 不然对方却的也是自己缺少的，加入mempool
+		// 否则就是正常的对方生成了MB
 		err := Buckets[mb.BucketID].Mempool.AddMicroblock(mb)
 		if err != nil {
 			logger.Error().Msg("Adding incoming microblock failed")
 		}
+		// 回复ACK
 		if !mb.IsRequested {
 			ack := &Ack{
 				Receiver:     membership.OwnID,
@@ -108,8 +98,9 @@ func HandleMicroblock(mb *MicroBlock) {
 				HandleAck(ack)
 			}
 		}
+		// 帮助对方转发
 		if mb.IsForward {
-			logger.Info().Msgf("[%v] is going to forward a mb for %d ,mb hash is %x", membership.OwnID, mb.Sender,mb.Hash)
+			logger.Info().Msgf("Peer %v is going to forward a mb %x for %d ", membership.OwnID, mb.Hash, mb.Sender)
 			pMsg := &pb.ProtocolMessage{
 				SenderId: membership.OwnID,
 				Msg: &pb.ProtocolMessage_Microblock{
@@ -117,6 +108,9 @@ func HandleMicroblock(mb *MicroBlock) {
 				},
 			}
 			for _, nodeID := range membership.AllNodeIDs() {
+				if nodeID == membership.OwnID{
+					continue
+				}
 				messenger.EnqueueMsg(pMsg, nodeID)
 			}
 		}
@@ -124,30 +118,12 @@ func HandleMicroblock(mb *MicroBlock) {
 }
 
 func HandleAck(ack *Ack) {
-	//if config.Configuration.MemType == "time" {
-	//	r.estimator.AddAck(ack)
-	// logger.Info().Msgf("Receing ack on %x from %d",ack.MicroblockID,ack.Receiver)
 	if Buckets[ack.BucketID].Mempool.IsStable(ack.MicroblockID) {
 		return
 	}
-	if ack.AckVerify() != nil{
+	if ack.AckVerify() != nil {
 		logger.Info().Msgf("Warning: wrong ack received!")
-		return	
-	}
-	if ack.Receiver != membership.OwnID {
-		// @TODO
-		// voteIsVerified, err := crypto.PubVerify(ack.Signature, crypto.IDToByte(ack.MicroblockID), ack.Receiver)
-		ackVerified := true
-		var err error
-
-		if err != nil {
-			// log.Warningf("[%v] Error in verifying the signature in ack id: %x", r.ID(), ack.MicroblockID)
-			return
-		}
-		if !ackVerified {
-			// log.Warningf("[%v] received an ack with invalid signature. vote id: %x", r.ID(), ack.MicroblockID)
-			return
-		}
+		return
 	}
 	Buckets[ack.BucketID].Mempool.AddAck(ack)
 	found, _ := Buckets[ack.BucketID].Mempool.FindMicroblock(ack.MicroblockID)
@@ -156,8 +132,8 @@ func HandleAck(ack *Ack) {
 		missingRequest := MissingMBRequest{
 			RequesterID:   membership.OwnID,
 			MissingMBList: []util.Identifier{ack.MicroblockID},
-			Sn:				-1,
-			BucketID: 		int32(ack.BucketID),
+			Sn:            -1,
+			BucketID:      int32(ack.BucketID),
 		}
 		msg := &pb.ProtocolMessage{
 			SenderId: membership.OwnID,
@@ -169,8 +145,8 @@ func HandleAck(ack *Ack) {
 	}
 }
 
+// 丢弃MB的本质是增加了一轮信息时延，不到万不得已，不应当允许节点肆意丢弃MB，
 func HandleMissingMicroblockRequest(mbr *MissingMBRequest) {
-	// logger.Info().Msgf("Rece a mbr from %d with sn:%d",mbr.RequesterID,mbr.Sn)
 	MissingCounts[mbr.RequesterID] += len(mbr.MissingMBList)
 	for _, mbid := range mbr.MissingMBList {
 		found, mb := Buckets[mbr.BucketID].Mempool.FindMicroblock(mbid)
@@ -183,7 +159,7 @@ func HandleMissingMicroblockRequest(mbr *MissingMBRequest) {
 					Microblock: ToProtoMicroBlock(mb),
 				},
 			}
-			logger.Info().Msgf("Fullfil a mb %x from mbr for %d with sn:%d by node: %d",mb.Hash, mbr.RequesterID,mbr.Sn,membership.OwnID)
+			logger.Debug().Msgf("Fullfil a mb %x from mbr for %d with sn:%d by node: %d", mb.Hash, mbr.RequesterID, mbr.Sn, membership.OwnID)
 			messenger.EnqueuePriorityMsg(msg, mbr.RequesterID)
 		} else {
 			// log.Errorf("[%v] a requested microblock is not found in mempool, id: %x", r.ID(), mbid)

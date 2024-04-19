@@ -93,7 +93,6 @@ func NewBucketGroup(bucketIDs []int) *BucketGroup {
 // 从组的桶剪出一个Batch
 func (bg *BucketGroup) CutBatch(size int, timeout time.Duration, sn int32) *Batch {
 	
-	alreadyWaited := bg.waitMinimum()
 	bg.lockBuckets()
 	defer bg.unlockBuckets()
 
@@ -101,13 +100,13 @@ func (bg *BucketGroup) CutBatch(size int, timeout time.Duration, sn int32) *Batc
 	// May release and re-acquire the bucket locks before returning.
 	// 先等待再切Batch
 
-	bg.waitForStableMicroBlockLocked(size, timeout-time.Duration(alreadyWaited)*time.Nanosecond)
+	// bg.waitForStableMicroBlockLocked(size, timeout)
 
 	// Create new request batch
 	newBatch := Batch{
 		MBHashList: make([][]byte, 0),
 		SigMap:     make(map[util.Identifier]map[int32][]byte),
-		BucketId:   -1,
+		BucketId:   0,
 		Sn:         int(sn),
 	}
 
@@ -126,16 +125,24 @@ func (bg *BucketGroup) CutBatch(size int, timeout time.Duration, sn int32) *Batc
 
 	for index, bucket := range bg.buckets {
 		// bucket.Mempool.MBmu.Lock()
-		bucket.Mempool.ForceClear()	
 		if bucket.Mempool.stableMicroblocks.Len() >= maxNum {
 			maxNum = bucket.Mempool.stableMicroblocks.Len()
 			maxIndex = index
 		}
 		// bucket.Mempool.MBmu.Unlock()
 	}
-
 	if size <= maxNum {
 		maxNum = size
+	}
+
+	// 说明邻近结束，我们需要尽快强制清空,本次共识一个空的Batch
+	if maxNum == 0 {
+		for _ , bucket := range bg.buckets {
+			clear := bucket.Mempool.ForceClear()	
+			if clear{
+				return  &newBatch
+			}
+		}
 	}
 
 	// Add initial requests to the batch.
@@ -158,7 +165,6 @@ func (bg *BucketGroup) CutBatch(size int, timeout time.Duration, sn int32) *Batc
 		Int("nBuckets", len(bg.buckets)).
 		Int("nMB", len(newBatch.MBHashList)).
 		Int("left", bg.CountStableMicroBlock()).
-		Int64("next", waitingTime/1000000). // In milliseconds
 		Msg("Batch cut.")
 	// return &Batch{
 	// 	MBHashList: make([][]byte, 0),

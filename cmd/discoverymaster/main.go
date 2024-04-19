@@ -17,7 +17,7 @@ func main() {
 	// Configure logger
 	zerolog.SetGlobalLevel(zerolog.InfoLevel)
 	zerolog.TimeFieldFormat = zerolog.TimeFormatUnixMicro
-	logger.Logger = logger.Output(zerolog.ConsoleWriter{Out: os.Stdout, TimeFormat: "15:04:05.000"})
+	logger.Logger = logger.Output(zerolog.ConsoleWriter{Out: os.Stdout, NoColor: true})
 
 	// Parse command line arguments.
 	port := os.Args[1]  // Port to listen on

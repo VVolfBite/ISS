@@ -63,6 +63,7 @@ type pbftInstance struct {
 	stopProp          sync.Once
 	//	next              int // The index  of the next to be proposed SN
 	startTs int64 // Timestamp of the start of the instance. Used for estimating duration of segment.
+    AnnounceMutex sync.Mutex
 }
 
 type pbftBatch struct {
@@ -264,7 +265,7 @@ func (pi *pbftInstance) proposeSN(preprepare *pb.PbftPreprepare, sn int32) {
 	}
 
 	// Create the actual request batch. The timeout is 0, since the we already waited for the batch in pi.lead().
-	batch := pi.segment.Buckets().CutBatch(batchSize, 10000, sn)
+	batch := pi.segment.Buckets().CutBatch(batchSize, 1000, sn)
 	// logger.Info().Msgf("Lookhere a new for mb %d batch gen: %d ",batch.Sn,len(batch.MBHashList))
 
 	// Notify batch cutting goroutine that it can start waiting for the next batch.
@@ -709,7 +710,8 @@ func (pi *pbftInstance) handleMissingEntry(msg *pb.MissingEntry) {
 }
 
 func (pi *pbftInstance) announce(batch *pbftBatch, sn int32, reqBatch *pb.FilledBatch, aborted bool, proposeTs int64, commitTs int64) {
-
+	pi.AnnounceMutex.Lock()
+	defer pi.AnnounceMutex.Unlock()
 	// Remove batch requests
 	request.RemoveBatch(request.NewFilledBatch(reqBatch))
 

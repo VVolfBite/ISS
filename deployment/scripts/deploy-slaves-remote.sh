@@ -33,11 +33,11 @@ while [ -n "$1" ]; do
   n=$2
   tag=$3
   shift 4 # shifting by one more, because the machine template file (also present in the deploy schedule is ignored).
-
+  
   # Wait for trigger
   master_status=$(scripts/remote-machine-status.sh $master_ip)
 
-  while [[ $((10#$trigger)) -ge 0 ]] && [[ ! ( "$master_status" =~ ^[0-9]+$ ) || ( $((10#$master_status)) -lt $((10#$trigger)) ) ]]; do
+  while [[ $trigger -ge 0 ]] && { [[ ! "$master_status" =~ ^[0-9]+$ ]] || [[ $((10#$master_status)) -lt $((10#$trigger)) ]]; }; do
     # Note the $((10#$trigger)) operand. This tells bash to interpret $trigger as a decimal number.
     # Otherwise, if $trigger starts with '0' (which it sometimes does), $trigger is treated as an octal number.
     sleep $machine_status_poll_period
@@ -47,7 +47,7 @@ while [ -n "$1" ]; do
   # Deploy slave nodes.
   echo "Deploying slaves: $n $tag"
   scripts/start-remote-slaves.sh "$exp_data_dir" "$tag" $n "$master_ip" $skip $(cat $instance_info_file) &
-
+  
   skip="$skip skip $n $tag"
 done
 

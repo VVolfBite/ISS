@@ -18,39 +18,48 @@ import (
 
 
 // MicroBlock 用于数据分发的基本分发单元
-// @部分字段尚未启用，如TImeStamp以及Hops
+// @TODO 部分字段尚未启用，如TImeStamp以及Hops
 type MicroBlock struct {
 	Sn              int
 	BucketID        int
 	Hash            util.Identifier
 	Txns            []*Request
-	Timestamp       time.Time
-	FutureTimestamp time.Time
 	Sender          int32
 	IsRequested     bool
 	IsForward       bool
-	Hops            int
 }
 
+// PendingMicroblock 用于存储尚未收集到足够ACK的MB ，ACK存储在ACKBuffer中，所以这里只需要一个快照的Map
 type PendingMicroblock struct {
 	Microblock *MicroBlock
-	AckMap     map[int32]struct{} // who has sent acks
+	AckMap     map[int32]struct{}
 }
+
+// Ack用于回复收到了MB，这里比较尴尬的是BucketID字段，因为MB是根据Bucket产生的，不过这并不是一个影响性能和安全的地方
+// 不如说ACK的存在使得程序性能提高了，因为使用MBHash——ACK的对应方式，节点只需要验证一次Signature即可，即收到MB时验证一次签名，之后足够的ACK本身保证了MB一定存在以及Req一定合法
 type Ack struct {
 	Receiver     int32
 	BucketID     int
 	MicroblockID util.Identifier
 	Signature    []byte
 }
+// PendingBlock 用于存储那些还在等待装载Proposal的Batch，因为Batch是根据一个Bucket提出的，所以PendingBlock对应一个专门的Proposal，
+// 目前使用的对应关系是Sn对应 
 type PendingBlock struct {
 	Payload    *Payload // microblocks that already exist
 	MBHashList [][]byte
 	MissingMap map[util.Identifier]struct{} // missing list
 }
+// Payload实际本质是ReqList，他是用于使用Hash进行分发前的本体备份
 type Payload struct {
 	MicroblockList []*MicroBlock
 	SigMap         map[util.Identifier]map[int32][]byte
 }
+// MissingMBRequest用于召回丢失的MB，这里我们必须处理一个情况，是否会存在即使有足够的ACK证明，但是仍然丢失了MB的情况，导致程序直接卡死？
+// FillBatch是另一个影响性能的地方，尤其在真的发生丢包情况时
+// 我们需要设计更好的召回方案... 
+// 比如再收到不存在的ACK时就可以开始召回了
+// 另外应该设计黑名单机制，避免重复请求占用太多带宽
 type MissingMBRequest struct {
 	RequesterID   int32
 	BucketID      int32
@@ -73,8 +82,6 @@ func (mb *MicroBlock) hash() util.Identifier {
 	for _, tx := range mb.Txns {
 		hashList = append(hashList, tx.Digest)
 	}
-	hashList = append(hashList, []byte(mb.Timestamp.String()))
-
 	// 计算哈希值并转换成 Identifier 类型
 	return util.BytesToIdentifier(crypto.MerkleHashDigests(hashList))
 }
@@ -82,12 +89,12 @@ func (mb *MicroBlock) hash() util.Identifier {
 func (ack *Ack) AckVerify() error {
 	pk, err := crypto.PublicKeyFromBytes(membership.NodeIdentity(ack.Receiver).PubKey)
 	if err != nil {
-		return fmt.Errorf("could not verify checkpoint signature: %s", err)
+		return fmt.Errorf("could not verify ack signature: %s", err)
 	}
 	hash := crypto.Hash(ack.AckDigest())
 	err = crypto.CheckSig(hash, pk, ack.Signature)
 	if err != nil {
-		return fmt.Errorf("could not verify checkpoint signature: %s", err)
+		return fmt.Errorf("could not verify ack signature: %s", err)
 	}
 	return nil
 }
@@ -109,7 +116,6 @@ func NewMicroblock(Sn int, txnList []*Request) *MicroBlock {
 	mb := new(MicroBlock)
 	mb.Sn = Sn
 	mb.Txns = txnList
-	mb.Timestamp = time.Now()
 	mb.Hash = mb.hash()
 	return mb
 }
@@ -225,12 +231,9 @@ func ToProtoMicroBlock(mb *MicroBlock) *pb.MicroBlock {
 		Sn:              int32(mb.Sn),
 		Hash:            &pb.Identifier{Value: mb.Hash[:]},
 		Txns:            txns,
-		Timestamp:       TimeToProtoTimestamp(mb.Timestamp),
-		FutureTimestamp: TimeToProtoTimestamp(mb.FutureTimestamp),
 		Sender:          int32(mb.Sender),
 		IsRequested:     mb.IsRequested,
 		IsForward:       mb.IsForward,
-		Hops:            int32(mb.Hops),
 		BucketId:        int32(mb.BucketID),
 	}
 }
@@ -247,12 +250,9 @@ func FromProtoMicroBlock(protoMb *pb.MicroBlock) *MicroBlock {
 		Sn:              int(protoMb.Sn),
 		Hash:            util.BytesToIdentifier(protoMb.Hash.Value),
 		Txns:            txns,
-		Timestamp:       ProtoTimestampToTime(protoMb.Timestamp),
-		FutureTimestamp: ProtoTimestampToTime(protoMb.FutureTimestamp),
 		Sender:          int32(protoMb.Sender),
 		IsRequested:     protoMb.IsRequested,
 		IsForward:       protoMb.IsForward,
-		Hops:            int(protoMb.Hops),
 		BucketID:        int(protoMb.BucketId),
 	}
 }

@@ -12,23 +12,20 @@ private_ip=$4
 
 init_command="
   export PATH=\$PATH:$remote_gopath/bin:$remote_work_dir/bin &&
-
+  
   cd $remote_work_dir &&
-  rsync --progress -rptz -e \"ssh $ssh_options\" root@$master_ip:$remote_tls_directory . &&
+  rsync --quiet -rptz -e \"ssh $ssh_options\" root@$master_ip:$remote_tls_directory . &&
   cd tls-data &&
   ./generate.sh $public_ip $private_ip &&
 
   cd $remote_work_dir &&
-  rsync --progress -rptz -e \"ssh $ssh_options\" root@$master_ip:$remote_gopath/bin/* $remote_gopath/bin/ &&
-  mkdir -p config &&
-
-  stubborn-scp.sh 5 $ssh_options $master_ip:$remote_code_dir/oldmir/oldmir-start.sh $remote_work_dir/bin &&
-  chmod u+x $remote_work_dir/bin/oldmir-start.sh"
+  rsync --quiet -rptz -e \"ssh $ssh_options\" root@$master_ip:$remote_gopath/bin/* $remote_gopath/bin/ &&
+  mkdir -p config "
 
 slave_command="
   ulimit -Sn $open_files_limit &&
   export PATH=\$PATH:$remote_gopath/bin:$remote_work_dir/bin &&
-  discoveryslave $tag $master_ip:$master_port $public_ip $private_ip"
+  discoveryslave $tag $master_ip:$master_port $public_ip $private_ip > $remote_slave_log 2>&1"
 
 echo "Setting up slave: $public_ip ($private_ip)"
 

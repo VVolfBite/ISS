@@ -8,11 +8,12 @@ analysis_query_params="-q queries/ethereum.sql -q queries/aggregates.sql -q quer
 
 # Private key, of which the corresponding public key needs to be an authorized ssh key at each instance.
 # (Previously uploaded to IBM Cloud and specified at instance creation in the corresponding template file)
-private_key_file=ibmcloud-ssh-key
+private_key_file=/root/.ssh/id_rsa
+private_key_deploymachine=/home/vvolfbite/.ssh/id_rsa
 
 # Options to use when communicating with the remote machines.
 ssh_options="-i $private_key_file -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=60"
-
+ssh_options_deploymachine="-i $private_key_deploymachine -o StrictHostKeyChecking=no -o UserKnownHostsFile=/dev/null -o ServerAliveInterval=60"
 # Command to kill children of exiting scripts
 trap_exit_command='{ jobs; if [ -n "$(jobs -p)" ]; then kill $(jobs -p); fi; sleep 0.5; } > /dev/null 2>&1'
 
@@ -35,8 +36,8 @@ open_files_limit=16384
 # Instead, the instance ready state is queried separately.
 instance_ready_timeout=600
 instance_creation_batch=64
-instance_info_file_name=cloud-instance-info
-default_instance_info=last-cloud-instance-info
+instance_info_file_name=instance-ip-info
+default_instance_info=last-instance-ip-info
 
 local_public_ip=127.0.0.1
 local_private_ip=127.0.0.1
@@ -53,7 +54,7 @@ remote_ready_file=$remote_work_dir/master-ready
 remote_main_log=/root/main_log.log
 remote_master_log=/root/master-log.log
 remote_slave_log=/root/slave-log.log
-remote_private_key_file=$remote_work_dir/ibmcloud-ssh-key # Key used by the instances to communicate among each other.
+remote_private_key_file=$remote_work_dir/.ssh/id_rsa # Key used by the instances to communicate among each other.
 remote_instance_detail_file=$remote_work_dir/instance-detail.json
 remote_user_script_body=$remote_work_dir/user-script-body.sh
 remote_user_script_uploaded=$remote_work_dir/user-script-uploaded
@@ -61,7 +62,7 @@ remote_master_command_file=$remote_work_dir/master-commands.cmd
 remote_exp_dir=$remote_work_dir/current-deployment-data
 remote_analysis_processes=8
 
-remote_gopath=/root/go
+remote_gopath=/opt/gopath
 remote_code_dir="$remote_gopath/src/github.com/hyperledger-labs/mirbft"
 remote_config_dir=$remote_work_dir/experiment-config
 remote_tls_directory="$remote_code_dir/tls-data"
