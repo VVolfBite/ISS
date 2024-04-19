@@ -122,10 +122,9 @@ BatchVerifier: BATCHVERIFIER # Determines how the requests in a batch are verifi
                              #                  verifies the requests. Communication is through buffered channels.
 
 # MICROBLOCK
-PoolBSize: POOLBSIZE
 PoolMSize: POOLMSIZE
-PoolMemSize: POOLMEMSIZE
 PoolStableThreshhold: POOLSTABLETHRESHHOLD
 
 # Unbalance
+LoadBalanceThreshhold: LOADBALANCETHRESHHOLD
 EnableHotSpot: ENABLEHOTSPOT
