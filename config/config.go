@@ -108,19 +108,15 @@ type configuration struct {
 	RequestInputChannelBuffer int    `yaml:"RequestInputChannelBuffer"`
 	BatchVerifier             string `yaml:"BatchVerifier"`
 
-	//MicroBlock
-	// 一个池子中存储的MB上限：无用
-	PoolBSize int `yaml:"PoolBSize"`
 	// 一个池子中存储的Byte上限，这是一个关键的参数，决定了默认情况下切块MicroBlock的大小
 	PoolMSize int `yaml:"PoolMSize"`
-	// 一个池子总Txn数量上限
-	PoolMemSize int `yaml:"PoolMemSize"`
 	// 参数决定了形成StableMicroBlock所需的ACK数量，数量越多，在召回时概率越大
 	PoolStableThreshhold int `yaml:"PoolStableThreshhold"`
-
-
-	// Unbalance
+	// 参数决定了一个节点开始负载转移的权重(表示每秒的分发块出块速度上限，超过上限节点会尝试让他人转发)
+	LoadBalanceThreshhold int `yaml:"LoadBalanceThreshhold"`
+	// 让节点集中只发往当前Epoch目标点
 	EnableHotSpot bool `yaml:"EnableHotSpot"`
+	
 
 	// SendingPort
 	// SendingPort int `yaml:"SendingPort"`

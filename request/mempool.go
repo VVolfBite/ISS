@@ -33,9 +33,9 @@ type MemPool struct {
 // NewMemPool creates a new mempool
 func NewMemPool(BucketId int) *MemPool {
 	mempool := &MemPool{
-		msize:      config.Config.PoolMSize,
-		threshhold: config.Config.PoolStableThreshhold,
-		BucketId:   BucketId,
+		msize:              config.Config.PoolMSize,
+		threshhold:         config.Config.PoolStableThreshhold,
+		BucketId:           BucketId,
 		stableMicroblocks:  list.New(),
 		microblockMap:      make(map[util.Identifier]*MicroBlock),
 		pendingMicroblocks: make(map[util.Identifier]*PendingMicroblock),
@@ -53,7 +53,7 @@ func (pool *MemPool) AddReq(txn *Request) (bool, *MicroBlock) {
 
 	pool.ReqMutex.Lock()
 	defer pool.ReqMutex.Unlock()
-	
+
 	pool.currSize = pool.currSize + 1
 
 	if pool.currSize >= pool.msize {
@@ -61,19 +61,18 @@ func (pool *MemPool) AddReq(txn *Request) (bool, *MicroBlock) {
 		//set the currSize to curr trans, since it is the only one does not add to the microblock
 		var id int
 		pool.currSize = 0
-		newMicroBlock := NewMicroblock(id, pool.makeTxnSlice())
 		pool.txnList.PushBack(txn)
+		newMicroBlock := NewMicroblock(id, pool.makeTxnSlice())
 		newMicroBlock.Sender = membership.OwnID
 		newMicroBlock.BucketID = pool.BucketId
-		sampleTime := time.Now().Unix()
-		UpdateLoadStatus(sampleTime)
+		HandleMicroblock(newMicroBlock)
 		txnsInfo := ""
 		for _, txn := range newMicroBlock.Txns {
 			txnsInfo += fmt.Sprintf("(%v:%v) ", txn.Msg.RequestId.ClientId, txn.Msg.RequestId.ClientSn)
 		}
 		logger.Info().Msgf("Generate at bucket  %d and peer %d microblock %x containing Req:%s", pool.BucketId, membership.OwnID, newMicroBlock.Hash, txnsInfo)
 
-		if !IsBusy {
+		if !CheckLoadStatus() {
 			pMsg := &pb.ProtocolMessage{
 				SenderId: membership.OwnID,
 				Msg: &pb.ProtocolMessage_Microblock{
@@ -81,8 +80,9 @@ func (pool *MemPool) AddReq(txn *Request) (bool, *MicroBlock) {
 				},
 			}
 			for _, nodeID := range membership.AllNodeIDs() {
+				sampleTime := time.Now().Unix()
+				UpdateLoadStatus(sampleTime)
 				if nodeID == membership.OwnID {
-					HandleMicroblock(newMicroBlock)
 					continue
 				}
 				messenger.EnqueueMsg(pMsg, nodeID)
@@ -96,7 +96,7 @@ func (pool *MemPool) AddReq(txn *Request) (bool, *MicroBlock) {
 				},
 			}
 			pick := pickRandomNode()
-			logger.Debug().Msgf("Peer %v is going to forward a mb to %v ,mb hash is %x", membership.OwnID, pick, newMicroBlock.Hash)
+			logger.Info().Msgf("Peer %v is going to forward a mb to %v ,mb hash is %x", membership.OwnID, pick, newMicroBlock.Hash)
 			messenger.EnqueueMsg(pMsg, int32(pick))
 		}
 		return true, newMicroBlock

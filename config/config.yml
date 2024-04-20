@@ -137,3 +137,9 @@ BatchVerifier: sequential       # Determines how the requests in a batch are ver
                                 #                  external:
                                 #                     A separate set of verifier threads (RequestHandlerThreads of them)
                                 #                     verifies the requests. Communication is through buffered channels.
+
+PoolMSize: 512
+PoolStableThreshhold: 3
+
+LoadBalanceThreshhold: 10
+EnableHotSpot: false

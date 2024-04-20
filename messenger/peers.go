@@ -285,9 +285,8 @@ func EnqueueMsg(msg *pb.ProtocolMessage, destNodeID int32) {
     switch m := msg.Msg.(type) {
     case *pb.ProtocolMessage_Microblock:
         microblock := m.Microblock
-        // 记录 Txns 字段中的请求的数量和大小
         txnsCount := len(microblock.Txns)
-        txnsSize, _ := json.Marshal(microblock.Txns) // 通过 JSON 序列化获取 Txns 字段的大小
+        txnsSize, _ := json.Marshal(microblock.Txns) 
         logger.Info().Msgf("Microblock message: Txns count: %d, Txns size: %d bytes", txnsCount, len(txnsSize))
     default:
     }

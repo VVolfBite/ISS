@@ -72,7 +72,7 @@ func NewBucketGroup(bucketIDs []int) *BucketGroup {
 	sort.Ints(bucketIDs)
 
 	// Create a new list of all the buckets based on their IDs
-	bucketList := make([]*Bucket, len(bucketIDs), len(bucketIDs))
+	bucketList := make([]*Bucket, len(bucketIDs))
 	for i, bucketID := range bucketIDs {
 		bucketList[i] = Buckets[bucketID]
 	}
@@ -95,13 +95,6 @@ func (bg *BucketGroup) CutBatch(size int, timeout time.Duration, sn int32) *Batc
 	
 	bg.lockBuckets()
 	defer bg.unlockBuckets()
-
-	// Wait for batch to fill or for the timeout to fire.
-	// May release and re-acquire the bucket locks before returning.
-	// 先等待再切Batch
-
-	// bg.waitForStableMicroBlockLocked(size, timeout)
-
 	// Create new request batch
 	newBatch := Batch{
 		MBHashList: make([][]byte, 0),
@@ -116,7 +109,6 @@ func (bg *BucketGroup) CutBatch(size int, timeout time.Duration, sn int32) *Batc
 	if len(bg.buckets) == 0 {
 		return &newBatch
 	}
-
 	// Calculate the initial number of Requests that can be fairly taken from each Bucket.
 	// (Requests from each Bucket must have the chance to make it in the Batch.)
 	// 这里为了后续方便处理，我们这样做： 选出一个含有stableMB最多的 然后进行Cut，而非多个桶各个cut一部分
@@ -255,7 +247,7 @@ func (bg *BucketGroup) MBAdded() {
 		// Stop the timer
 		if bg.timer.Stop() {
 
-			// And release WaitForReuests().
+			// And release WaitForRequests().
 			// Note that stopping the timer might fail if the timeout triggers concurrently with MBAdded().
 			// In such a case, this line is not executed, as the timeout does the job.
 			bg.batchTrigger <- struct{}{}

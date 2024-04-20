@@ -17,6 +17,8 @@ package request
 import (
 	"encoding/binary"
 	"sync"
+	"time"
+
 	"github.com/hyperledger-labs/mirbft/config"
 	"github.com/hyperledger-labs/mirbft/crypto"
 	"github.com/hyperledger-labs/mirbft/membership"
@@ -61,10 +63,8 @@ var (
 	MissingMBs      map[util.Identifier]int      // 缺失的mb，即所有 pending block的快速映射
 	ReceivedMBs     map[util.Identifier]struct{} // 收到的mb
 	PendingBlockMap map[int]*PendingBlock        // pending block 是对fill proposal后仍有mb没有获取需要retrive的的block的称呼
-	IsBusy          bool                         // 用于负载均衡的检测
+	// IsBusy          bool                         // 用于负载均衡的检测
 	mu              sync.Mutex                   // 保护线程安全所需要的锁
-
-	LoadBusyStatus		bool
 	LoadQueue 		[]int64
 	LoadMutex 		sync.Mutex
 
@@ -408,24 +408,28 @@ func UpdateLoadStatus(timestamp int64) {
 	LoadMutex.Lock()
 	defer LoadMutex.Unlock()
 	LoadQueue = append(LoadQueue, timestamp)
-	if len(LoadQueue) > 10 {
+	if len(LoadQueue) > int(3 * len(membership.AllNodeIDs())) {
 		LoadQueue = LoadQueue[1:]
 	}
+}
+
+func CheckLoadStatus() bool {
+	LoadMutex.Lock()
+	defer LoadMutex.Unlock()
 	queueLength := len(LoadQueue)
 	if queueLength < 2 {
-		LoadBusyStatus = false // 如果队列长度小于2，则默认为非繁忙状态
-		return
+		return false
 	}
-	lastTimestamp := LoadQueue[queueLength-1]
+	nowTimeStamp := time.Now().Unix()
 	firstTimestamp := LoadQueue[0]
-	timeSpan := lastTimestamp - firstTimestamp
-
+	timeSpan := nowTimeStamp - firstTimestamp
 	// 计算负载指标
-	loadIndicator := float64(queueLength) / float64(timeSpan)
-	if loadIndicator > 10 {
-		LoadBusyStatus = true
-	} else {
-		LoadBusyStatus = false
-	}
+	loadIndicator := float64(queueLength) / float64(timeSpan)	
 	logger.Info().Msgf("Sampling rate is %f / s",loadIndicator)
+	if loadIndicator > float64(config.Config.LoadBalanceThreshhold) {
+		return true
+	} else {
+		return false
+	}
+
 }

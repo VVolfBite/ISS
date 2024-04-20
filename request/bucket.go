@@ -153,7 +153,6 @@ func (b *Bucket) addNoLock(newReq *Request) (*Request, bool) {
 	oldReq, ok := b.reqIndex[reqID]
 	// If Request with same digest already is in the bucket, return that Request
 	if ok && bytes.Compare(oldReq.Digest, newReq.Digest) == 0 {
-
 		//logger.Trace().
 		//	Int("bucketId", b.id).
 		//	Int("len", b.Len()).

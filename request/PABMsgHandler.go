@@ -101,6 +101,7 @@ func HandleMicroblock(mb *MicroBlock) {
 		// 帮助对方转发
 		if mb.IsForward {
 			logger.Info().Msgf("Peer %v is going to forward a mb %x for %d ", membership.OwnID, mb.Hash, mb.Sender)
+			mb.IsForward = false
 			pMsg := &pb.ProtocolMessage{
 				SenderId: membership.OwnID,
 				Msg: &pb.ProtocolMessage_Microblock{
@@ -108,7 +109,7 @@ func HandleMicroblock(mb *MicroBlock) {
 				},
 			}
 			for _, nodeID := range membership.AllNodeIDs() {
-				if nodeID == membership.OwnID{
+				if (nodeID == membership.OwnID || nodeID == mb.Sender) {
 					continue
 				}
 				messenger.EnqueueMsg(pMsg, nodeID)
